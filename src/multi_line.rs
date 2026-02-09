@@ -101,8 +101,15 @@ impl MultiLineChartModel {
 
         // Avoid degenerate y ranges.
         if !(y_max > y_min) {
-            y_min -= 1.0;
-            y_max += 1.0;
+            // Handle degenerate or invalid y-ranges.
+            if y_min.is_finite() && y_max.is_finite() {
+                y_min -= 1.0;
+                y_max += 1.0;
+            } else {
+                // Fallback for non-finite ranges (e.g. all NaN data).
+                y_min = -1.0;
+                y_max = 1.0;
+            }
         }
 
         let domain = Domain2D::new(Domain1D::new(x_min, x_max), Domain1D::new(y_min, y_max));

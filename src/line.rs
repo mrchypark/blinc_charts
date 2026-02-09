@@ -84,7 +84,17 @@ pub struct LineChartModel {
 impl LineChartModel {
     pub fn new(series: TimeSeriesF32) -> Self {
         let (x0, x1) = series.x_min_max();
-        let (y0, y1) = series.y_min_max();
+        let (mut y0, mut y1) = series.y_min_max();
+        if !(y1 > y0) {
+            // Handle degenerate or invalid y-ranges (e.g. all NaN -> (0,0)).
+            if y0.is_finite() && y1.is_finite() {
+                y0 -= 1.0;
+                y1 += 1.0;
+            } else {
+                y0 = -1.0;
+                y1 = 1.0;
+            }
+        }
         let domain = Domain2D::new(Domain1D::new(x0, x1), Domain1D::new(y0, y1));
         Self {
             series,

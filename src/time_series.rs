@@ -47,8 +47,17 @@ impl TimeSeriesF32 {
         let mut min = f32::INFINITY;
         let mut max = f32::NEG_INFINITY;
         for &v in self.y.iter() {
-            min = min.min(v);
-            max = max.max(v);
+            // Ignore NaN/Inf so domains stay valid and we don't propagate NaNs.
+            if v.is_finite() {
+                min = min.min(v);
+                max = max.max(v);
+            }
+        }
+
+        // If there were no finite values, return an "empty" range that won't
+        // influence min/max aggregation in callers.
+        if !min.is_finite() || !max.is_finite() {
+            return (f32::INFINITY, f32::NEG_INFINITY);
         }
         (min, max)
     }
@@ -110,5 +119,21 @@ mod tests {
 
         assert_eq!(s.lower_bound_x(100.0), 5);
         assert_eq!(s.upper_bound_x(100.0), 5);
+    }
+
+    #[test]
+    fn y_min_max_ignores_non_finite() {
+        let x = vec![0.0, 1.0, 2.0, 3.0];
+        let y = vec![1.0, f32::NAN, 2.0, f32::INFINITY];
+        let s = TimeSeriesF32::new(x, y).unwrap();
+        assert_eq!(s.y_min_max(), (1.0, 2.0));
+    }
+
+    #[test]
+    fn y_min_max_all_non_finite_returns_zero_range() {
+        let x = vec![0.0, 1.0, 2.0];
+        let y = vec![f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
+        let s = TimeSeriesF32::new(x, y).unwrap();
+        assert_eq!(s.y_min_max(), (f32::INFINITY, f32::NEG_INFINITY));
     }
 }
