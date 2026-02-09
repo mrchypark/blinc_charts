@@ -54,31 +54,11 @@ impl TimeSeriesF32 {
     }
 
     pub fn lower_bound_x(&self, x: f32) -> usize {
-        let mut lo = 0usize;
-        let mut hi = self.len();
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            if self.x[mid] < x {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        lo
+        self.x.partition_point(|v| *v < x)
     }
 
     pub fn upper_bound_x(&self, x: f32) -> usize {
-        let mut lo = 0usize;
-        let mut hi = self.len();
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            if self.x[mid] <= x {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        lo
+        self.x.partition_point(|v| *v <= x)
     }
 
     /// Return (nearest_index, nearest_x, nearest_y) to a given x (domain units).
@@ -100,5 +80,35 @@ impl TimeSeriesF32 {
         let db = (self.x[b] - x).abs();
         let j = if db < da { b } else { a };
         Some((j, self.x[j], self.y[j]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounds_match_expected_indices() {
+        let x = vec![0.0, 1.0, 1.0, 2.0, 10.0];
+        let y = vec![0.0; x.len()];
+        let s = TimeSeriesF32::new(x, y).unwrap();
+
+        assert_eq!(s.lower_bound_x(-1.0), 0);
+        assert_eq!(s.upper_bound_x(-1.0), 0);
+
+        assert_eq!(s.lower_bound_x(0.0), 0);
+        assert_eq!(s.upper_bound_x(0.0), 1);
+
+        assert_eq!(s.lower_bound_x(1.0), 1);
+        assert_eq!(s.upper_bound_x(1.0), 3);
+
+        assert_eq!(s.lower_bound_x(1.5), 3);
+        assert_eq!(s.upper_bound_x(1.5), 3);
+
+        assert_eq!(s.lower_bound_x(10.0), 4);
+        assert_eq!(s.upper_bound_x(10.0), 5);
+
+        assert_eq!(s.lower_bound_x(100.0), 5);
+        assert_eq!(s.upper_bound_x(100.0), 5);
     }
 }
