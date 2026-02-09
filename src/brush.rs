@@ -16,7 +16,11 @@ impl BrushX {
     }
 
     pub fn anchor_px(&self) -> Option<f32> {
-        if self.active { Some(self.start_px) } else { None }
+        if self.active {
+            Some(self.start_px)
+        } else {
+            None
+        }
     }
 
     pub fn begin(&mut self, x_px: f32) {

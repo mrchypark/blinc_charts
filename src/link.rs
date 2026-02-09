@@ -47,4 +47,3 @@ pub type ChartLinkHandle = Arc<Mutex<ChartLink>>;
 pub fn chart_link(x_min: f32, x_max: f32) -> ChartLinkHandle {
     Arc::new(Mutex::new(ChartLink::new(Domain1D::new(x_min, x_max))))
 }
-

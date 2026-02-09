@@ -1,149 +1,169 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, CornerRadius, DrawContext, Point, Rect, Stroke, TextStyle};
+use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 use blinc_layout::canvas::canvas;
 use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::brush::BrushX;
+use crate::common::{draw_grid, fill_bg};
 use crate::link::ChartLinkHandle;
-use crate::lod::{downsample_min_max, DownsampleParams};
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SampleKey {
+struct BinKey {
     x_min: u32,
     x_max: u32,
     plot_w: u32,
     plot_h: u32,
+    series_n: u32,
 }
 
-impl SampleKey {
-    fn new(x_min: f32, x_max: f32, plot_w: f32, plot_h: f32) -> Self {
+impl BinKey {
+    fn new(x_min: f32, x_max: f32, plot_w: f32, plot_h: f32, series_n: usize) -> Self {
         Self {
             x_min: x_min.to_bits(),
             x_max: x_max.to_bits(),
             plot_w: plot_w.to_bits(),
             plot_h: plot_h.to_bits(),
+            series_n: series_n as u32,
         }
     }
 }
 
-/// Visual styling for the line chart.
 #[derive(Clone, Debug)]
-pub struct LineChartStyle {
+pub struct BarChartStyle {
     pub bg: Color,
     pub grid: Color,
-    pub line: Color,
-    pub crosshair: Color,
     pub text: Color,
-    pub stroke_width: f32,
+    pub crosshair: Color,
     pub scroll_zoom_factor: f32,
     pub pinch_zoom_min: f32,
+
+    pub stacked: bool,
+    pub bar_alpha: f32,
+    pub max_series: usize,
+    pub max_bins: usize,
 }
 
-impl Default for LineChartStyle {
+impl Default for BarChartStyle {
     fn default() -> Self {
         Self {
             bg: Color::rgba(0.08, 0.09, 0.11, 1.0),
             grid: Color::rgba(1.0, 1.0, 1.0, 0.08),
-            line: Color::rgba(0.35, 0.65, 1.0, 1.0),
-            crosshair: Color::rgba(1.0, 1.0, 1.0, 0.35),
             text: Color::rgba(1.0, 1.0, 1.0, 0.85),
-            stroke_width: 1.5,
+            crosshair: Color::rgba(1.0, 1.0, 1.0, 0.35),
             scroll_zoom_factor: 0.02,
             pinch_zoom_min: 0.01,
+            stacked: true,
+            bar_alpha: 0.85,
+            max_series: 16,
+            max_bins: 20_000,
         }
     }
 }
 
-/// Mutable model for an interactive line chart.
-///
-/// Store this behind an `Arc<Mutex<_>>` and reuse across rebuilds.
-pub struct LineChartModel {
-    pub series: TimeSeriesF32,
+pub struct BarChartModel {
+    pub series: Vec<TimeSeriesF32>,
     pub view: ChartView,
-    pub style: LineChartStyle,
+    pub style: BarChartStyle,
 
-    pub crosshair_x: Option<f32>,   // local px in plot area
-    pub hover_point: Option<Point>, // data coords
+    pub crosshair_x: Option<f32>,
+    pub hover_x: Option<f32>,
 
-    downsampled: Vec<Point>, // data coords
-    points_px: Vec<Point>,   // screen coords (local)
-    downsample_params: DownsampleParams,
-    user_max_points: usize,
+    bins: Vec<f32>, // bins_n * series_n
+    bins_n: usize,
+    last_bin_key: Option<BinKey>,
 
-    // Cache key for (re)sampling. Hover-only interactions should not force
-    // downsampling or point transforms on every frame.
-    last_sample_key: Option<SampleKey>,
-
-    // EventRouter's drag_delta_x/y are "offset from drag start", not per-frame deltas.
-    // Track last observed totals so we can convert to incremental deltas for panning.
     last_drag_total_x: Option<f32>,
-
     brush_x: BrushX,
 }
 
-impl LineChartModel {
-    pub fn new(series: TimeSeriesF32) -> Self {
-        let (x0, x1) = series.x_min_max();
-        let (mut y0, mut y1) = series.y_min_max();
-        if !(y1 > y0) {
-            // Handle degenerate or invalid y-ranges (e.g. all NaN -> (0,0)).
-            if y0.is_finite() && y1.is_finite() {
-                y0 -= 1.0;
-                y1 += 1.0;
-            } else {
-                y0 = -1.0;
-                y1 = 1.0;
+impl BarChartModel {
+    pub fn new(series: Vec<TimeSeriesF32>) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            !series.is_empty(),
+            "BarChartModel requires at least 1 series"
+        );
+
+        let mut x_min = f32::INFINITY;
+        let mut x_max = f32::NEG_INFINITY;
+        let mut y_min = f32::INFINITY;
+        let mut y_max_pos_sum = 0.0f32;
+
+        for s in &series {
+            let (sx0, sx1) = s.x_min_max();
+            x_min = x_min.min(sx0);
+            x_max = x_max.max(sx1);
+            let (sy0, sy1) = s.y_min_max();
+            y_min = y_min.min(sy0);
+            if sy1.is_finite() {
+                y_max_pos_sum += sy1.max(0.0);
             }
         }
-        let domain = Domain2D::new(Domain1D::new(x0, x1), Domain1D::new(y0, y1));
-        Self {
+
+        if !y_min.is_finite() {
+            y_min = -1.0;
+        }
+        let mut y_max = if y_max_pos_sum.is_finite() && y_max_pos_sum > y_min {
+            y_max_pos_sum
+        } else {
+            1.0
+        };
+        if !(y_max > y_min) {
+            y_max = y_min + 1.0;
+        }
+
+        let domain = Domain2D::new(Domain1D::new(x_min, x_max), Domain1D::new(y_min, y_max));
+        Ok(Self {
             series,
             view: ChartView::new(domain),
-            style: LineChartStyle::default(),
+            style: BarChartStyle::default(),
             crosshair_x: None,
-            hover_point: None,
-            downsampled: Vec::new(),
-            points_px: Vec::new(),
-            downsample_params: DownsampleParams::default(),
-            user_max_points: DownsampleParams::default().max_points,
-            last_sample_key: None,
+            hover_x: None,
+            bins: Vec::new(),
+            bins_n: 0,
+            last_bin_key: None,
             last_drag_total_x: None,
             brush_x: BrushX::default(),
-        }
-    }
-
-    pub fn set_downsample_max_points(&mut self, max_points: usize) {
-        self.user_max_points = max_points.max(64);
+        })
     }
 
     fn plot_rect(&self, w: f32, h: f32) -> (f32, f32, f32, f32) {
         self.view.plot_rect(w, h)
     }
 
+    fn series_color(&self, i: usize) -> Color {
+        // Simple deterministic palette (good enough for now).
+        let hues = [
+            (0.35, 0.65, 1.0),
+            (0.95, 0.55, 0.35),
+            (0.40, 0.85, 0.55),
+            (0.90, 0.75, 0.25),
+            (0.75, 0.55, 0.95),
+            (0.25, 0.80, 0.85),
+        ];
+        let (r, g, b) = hues[i % hues.len()];
+        Color::rgba(r, g, b, self.style.bar_alpha)
+    }
+
     pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
             self.crosshair_x = None;
-            self.hover_point = None;
+            self.hover_x = None;
             return;
         }
 
         if local_x < px || local_x > px + pw || local_y < py || local_y > py + ph {
             self.crosshair_x = None;
-            self.hover_point = None;
+            self.hover_x = None;
             return;
         }
 
         self.crosshair_x = Some(local_x);
-        let x = self.view.px_to_x(local_x, px, pw);
-        self.hover_point = self
-            .series
-            .nearest_by_x(x)
-            .map(|(_i, xx, yy)| Point::new(xx, yy));
+        self.hover_x = Some(self.view.px_to_x(local_x, px, pw));
     }
 
     pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
@@ -153,17 +173,9 @@ impl LineChartModel {
         }
         let cursor_x_px = cursor_x_px.clamp(px, px + pw);
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
-
-        // Trackpad/mouse wheel: delta_y > 0 typically means scroll down.
-        // Use exponential zoom so it feels consistent across devices.
-        //
-        // Note: On desktop, pixel scroll deltas are normalized in the platform layer,
-        // so use a larger factor to keep zoom responsive.
         let delta_y = delta_y.clamp(-250.0, 250.0);
         let zoom = (-delta_y * self.style.scroll_zoom_factor).exp();
         self.view.domain.x.zoom_about(pivot_x, zoom);
-
-        // Prevent collapsing to 0 span.
         self.view.domain.x.clamp_span_min(1e-6);
     }
 
@@ -174,28 +186,23 @@ impl LineChartModel {
         }
         let cursor_x_px = cursor_x_px.clamp(px, px + pw);
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
-
-        // EventContext::pinch_scale is "ratio delta per update (1.0 = no change)".
         let zoom = scale_delta.max(self.style.pinch_zoom_min);
         self.view.domain.x.zoom_about(pivot_x, zoom);
         self.view.domain.x.clamp_span_min(1e-6);
     }
 
-    /// Pan using drag "total delta from start" (EventContext::drag_delta_x).
     pub fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
         let (_px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
             return;
         }
 
-        // Convert total-from-start to incremental delta since last event.
         let prev = self.last_drag_total_x.replace(drag_total_dx);
         let drag_dx = match prev {
             Some(p) => drag_total_dx - p,
             None => 0.0,
         };
 
-        // Convert pixel delta to domain delta.
         let dx = -drag_dx / pw * self.view.domain.x.span();
         self.view.domain.x.pan_by(dx);
     }
@@ -224,12 +231,10 @@ impl LineChartModel {
         if pw <= 0.0 {
             return;
         }
-        // Brush updates track cursor position. DRAG provides delta-from-start, so infer current x.
-        let Some(start_x) = self.brush_x.anchor_px() else {
-            return;
-        };
-        let x = start_x + drag_total_dx;
-        self.brush_x.update(x.clamp(px, px + pw));
+        if let Some(anchor) = self.brush_x.anchor_px() {
+            self.brush_x
+                .update((anchor + drag_total_dx).clamp(px, px + pw));
+        }
     }
 
     pub fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
@@ -239,89 +244,147 @@ impl LineChartModel {
             return None;
         }
         let (a_px, b_px) = self.brush_x.take_final_px()?;
+        let a_px = a_px.clamp(px, px + pw);
+        let b_px = b_px.clamp(px, px + pw);
         let a = self.view.px_to_x(a_px, px, pw);
         let b = self.view.px_to_x(b_px, px, pw);
         Some(if a <= b { (a, b) } else { (b, a) })
     }
 
-    fn ensure_samples(&mut self, w: f32, h: f32) {
+    fn ensure_bins(&mut self, w: f32, h: f32) {
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
-            self.downsampled.clear();
-            self.points_px.clear();
-            self.last_sample_key = None;
             return;
         }
 
-        let key = SampleKey::new(self.view.domain.x.min, self.view.domain.x.max, pw, ph);
-        if self.last_sample_key == Some(key) {
-            return;
-        }
-
-        // Keep output bounded by pixels (2 points per pixel column is plenty).
-        let max_points = (pw.ceil() as usize).saturating_mul(2).clamp(128, 200_000);
-        self.downsample_params.max_points = self.user_max_points.min(max_points);
-
-        downsample_min_max(
-            &self.series,
+        let series_n = self.series.len().min(self.style.max_series);
+        let key = BinKey::new(
             self.view.domain.x.min,
             self.view.domain.x.max,
-            self.downsample_params,
-            &mut self.downsampled,
+            pw,
+            ph,
+            series_n,
         );
-
-        // Ensure at least 2 points for drawing.
-        if self.downsampled.len() == 1 {
-            self.downsampled.push(self.downsampled[0]);
+        if self.last_bin_key == Some(key) {
+            return;
         }
 
-        // Convert to local pixel points once.
-        self.points_px.clear();
-        self.points_px.reserve(self.downsampled.len());
-        for p in &self.downsampled {
-            self.points_px
-                .push(self.view.data_to_px(*p, px, py, pw, ph));
+        let bins_n = (pw.ceil() as usize)
+            .clamp(8, self.style.max_bins.max(8))
+            .min(self.style.max_bins);
+        self.bins_n = bins_n;
+        self.bins.clear();
+        self.bins.resize(bins_n * series_n, 0.0);
+
+        let x0 = self.view.domain.x.min;
+        let x1 = self.view.domain.x.max;
+        let span = (x1 - x0).max(1e-12);
+        let inv_span = 1.0 / span;
+
+        for (s_idx, s) in self.series.iter().take(series_n).enumerate() {
+            let i0 = s.lower_bound_x(x0).min(s.len());
+            let i1 = s.upper_bound_x(x1).min(s.len());
+            let mut counts: Vec<u32> = vec![0; bins_n];
+
+            for i in i0..i1 {
+                let x = s.x[i];
+                let y = s.y[i];
+                if !x.is_finite() || !y.is_finite() {
+                    continue;
+                }
+                let t = ((x - x0) * inv_span).clamp(0.0, 0.999_999);
+                let bin = (t * bins_n as f32) as usize;
+                let idx = s_idx * bins_n + bin;
+                self.bins[idx] += y;
+                counts[bin] += 1;
+            }
+
+            // Convert sum->mean to keep values bounded.
+            for bin in 0..bins_n {
+                let c = counts[bin].max(1) as f32;
+                self.bins[s_idx * bins_n + bin] /= c;
+            }
         }
 
-        self.last_sample_key = Some(key);
+        // Expand y domain to fit current bins (stacked sum).
+        if self.style.stacked {
+            let mut max_sum = 0.0f32;
+            for bin in 0..bins_n {
+                let mut sum = 0.0f32;
+                for s_idx in 0..series_n {
+                    sum += self.bins[s_idx * bins_n + bin].max(0.0);
+                }
+                max_sum = max_sum.max(sum);
+            }
+            if max_sum.is_finite() && max_sum > self.view.domain.y.min {
+                self.view.domain.y.max = max_sum.max(self.view.domain.y.min + 1e-6);
+            }
+        }
+
+        // Touch key so hover-only doesn't recompute bins.
+        let _ = (px, py);
+        self.last_bin_key = Some(key);
     }
 
     pub fn render_plot(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
-        // Background
-        ctx.fill_rect(
-            Rect::new(0.0, 0.0, w, h),
-            CornerRadius::default(),
-            Brush::Solid(self.style.bg),
-        );
+        fill_bg(ctx, w, h, self.style.bg);
 
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
             return;
         }
 
-        // Grid (cheap, fixed count)
-        let grid_n = 4;
-        for i in 0..=grid_n {
-            let t = i as f32 / grid_n as f32;
-            let x = px + t * pw;
-            let y = py + t * ph;
-            ctx.fill_rect(
-                Rect::new(x, py, 1.0, ph),
-                0.0.into(),
-                Brush::Solid(self.style.grid),
-            );
-            ctx.fill_rect(
-                Rect::new(px, y, pw, 1.0),
-                0.0.into(),
-                Brush::Solid(self.style.grid),
-            );
+        draw_grid(ctx, px, py, pw, ph, self.style.grid, 4);
+        self.ensure_bins(w, h);
+
+        let series_n = self.series.len().min(self.style.max_series);
+        if self.bins_n == 0 || series_n == 0 {
+            return;
         }
 
-        // Series (cached)
-        self.ensure_samples(w, h);
-        if self.points_px.len() >= 2 {
-            let stroke = Stroke::new(self.style.stroke_width);
-            ctx.stroke_polyline(&self.points_px, &stroke, Brush::Solid(self.style.line));
+        let bar_w = (pw / self.bins_n as f32).max(1.0);
+        let baseline_y = 0.0f32;
+        let baseline_px = self.view.y_to_px(baseline_y, py, ph).clamp(py, py + ph);
+
+        for bin in 0..self.bins_n {
+            let x = px + bin as f32 * (pw / self.bins_n as f32);
+
+            if self.style.stacked {
+                let mut acc = baseline_y;
+                for s_idx in 0..series_n {
+                    let v = self.bins[s_idx * self.bins_n + bin];
+                    let y0 = acc;
+                    let y1 = acc + v;
+                    acc = y1;
+
+                    let y0_px = self.view.y_to_px(y0, py, ph);
+                    let y1_px = self.view.y_to_px(y1, py, ph);
+                    let top = y0_px.min(y1_px);
+                    let bottom = y0_px.max(y1_px);
+                    let rect_h = (bottom - top).max(0.5);
+
+                    ctx.fill_rect(
+                        Rect::new(x, top, bar_w, rect_h),
+                        0.0.into(),
+                        Brush::Solid(self.series_color(s_idx)),
+                    );
+                }
+            } else {
+                // Grouped: split bin into N groups.
+                let group_w = (bar_w / series_n as f32).max(1.0);
+                for s_idx in 0..series_n {
+                    let v = self.bins[s_idx * self.bins_n + bin];
+                    let y_px = self.view.y_to_px(v, py, ph);
+                    let top = y_px.min(baseline_px);
+                    let bottom = y_px.max(baseline_px);
+                    let rect_h = (bottom - top).max(0.5);
+                    ctx.fill_rect(
+                        Rect::new(x + s_idx as f32 * group_w, top, group_w, rect_h),
+                        0.0.into(),
+                        Brush::Solid(self.series_color(s_idx)),
+                    );
+                }
+            }
         }
     }
 
@@ -331,7 +394,6 @@ impl LineChartModel {
             return;
         }
 
-        // In-progress brush (X-only).
         if let Some((a, b)) = self.brush_x.range_px() {
             let x = a.clamp(px, px + pw);
             let w = (b - a).abs().max(1.0);
@@ -342,7 +404,6 @@ impl LineChartModel {
             );
         }
 
-        // Crosshair
         if let Some(cx) = self.crosshair_x {
             let x = cx.clamp(px, px + pw);
             ctx.fill_rect(
@@ -352,42 +413,27 @@ impl LineChartModel {
             );
         }
 
-        // Tooltip (simple)
-        if let Some(p) = self.hover_point {
-            let text = format!("x={:.3}  y={:.3}", p.x, p.y);
+        if let Some(x) = self.hover_x {
+            let text = format!("x={:.3}", x);
             let style = TextStyle::new(12.0).with_color(self.style.text);
-            // Anchor near top-left of plot.
             ctx.draw_text(&text, Point::new(px + 6.0, py + 6.0), &style);
         }
     }
 }
 
-/// Shared handle for a line chart model.
 #[derive(Clone)]
-pub struct LineChartHandle(pub Arc<Mutex<LineChartModel>>);
+pub struct BarChartHandle(pub Arc<Mutex<BarChartModel>>);
 
-impl LineChartHandle {
-    pub fn new(model: LineChartModel) -> Self {
+impl BarChartHandle {
+    pub fn new(model: BarChartModel) -> Self {
         Self(Arc::new(Mutex::new(model)))
     }
 }
 
-/// Create an interactive line chart element.
-///
-/// Composition:
-/// - Root: `stack()` (so callers can overlay additional canvases/elements)
-/// - Child 1: plot `canvas` (background layer)
-/// - Child 2: overlay `canvas` (foreground layer)
-///
-/// Interactions (using Blinc events):
-/// - `on_mouse_move`: updates crosshair + nearest-point hover
-/// - `on_scroll` / `on_pinch`: zoom X about cursor
-/// - `on_drag`: pan X
-pub fn line_chart(handle: LineChartHandle) -> impl ElementBuilder {
+pub fn bar_chart(handle: BarChartHandle) -> impl ElementBuilder {
     let model_plot = handle.0.clone();
     let model_overlay = handle.0.clone();
 
-    // Events mutate the shared model and request a redraw (no tree rebuild).
     let model_move = handle.0.clone();
     let model_scroll = handle.0.clone();
     let model_pinch = handle.0.clone();
@@ -435,9 +481,9 @@ pub fn line_chart(handle: LineChartHandle) -> impl ElementBuilder {
                 blinc_layout::stateful::request_redraw();
             }
         })
-        .on_mouse_up(move |_e| {
+        .on_mouse_up(move |e| {
             if let Ok(mut m) = model_up.lock() {
-                let _ = m.on_mouse_up_finish_brush_x(_e.bounds_width, _e.bounds_height);
+                let _ = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height);
                 m.on_drag_end();
                 blinc_layout::stateful::request_redraw();
             }
@@ -468,13 +514,7 @@ pub fn line_chart(handle: LineChartHandle) -> impl ElementBuilder {
         )
 }
 
-/// Create a linked line chart element.
-///
-/// Additional behaviors:
-/// - Pan/zoom is synchronized via `link.x_domain` (shared X domain).
-/// - Hover is broadcast via `link.hover_x`.
-/// - Selection (brush) is created with Shift+Drag and stored in `link.selection_x`.
-pub fn linked_line_chart(handle: LineChartHandle, link: ChartLinkHandle) -> impl ElementBuilder {
+pub fn linked_bar_chart(handle: BarChartHandle, link: ChartLinkHandle) -> impl ElementBuilder {
     let model_plot = handle.0.clone();
     let model_overlay = handle.0.clone();
 
@@ -504,11 +544,7 @@ pub fn linked_line_chart(handle: LineChartHandle, link: ChartLinkHandle) -> impl
             if let (Ok(mut l), Ok(mut m)) = (link_move.lock(), model_move.lock()) {
                 m.view.domain.x = l.x_domain;
                 m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
-
-                // Publish hover x in domain units (or None when out of plot).
-                let (px, _py, pw, _ph) = m.plot_rect(e.bounds_width, e.bounds_height);
-                if pw > 0.0 && m.crosshair_x.is_some() {
-                    let x = m.view.px_to_x(e.local_x.clamp(px, px + pw), px, pw);
+                if let Some(x) = m.hover_x {
                     l.set_hover_x(Some(x));
                 } else {
                     l.set_hover_x(None);
@@ -552,9 +588,9 @@ pub fn linked_line_chart(handle: LineChartHandle, link: ChartLinkHandle) -> impl
         })
         .on_mouse_up(move |e| {
             if let (Ok(mut l), Ok(mut m)) = (link_up.lock(), model_up.lock()) {
-                m.view.domain.x = l.x_domain;
-                if let Some(sel) = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height) {
-                    l.set_selection_x(Some(sel));
+                if let Some((a, b)) = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height)
+                {
+                    l.set_selection_x(Some((a, b)));
                 }
                 m.on_drag_end();
                 blinc_layout::stateful::request_redraw();
@@ -579,29 +615,6 @@ pub fn linked_line_chart(handle: LineChartHandle, link: ChartLinkHandle) -> impl
             canvas(move |ctx, bounds| {
                 if let (Ok(l), Ok(mut m)) = (link_overlay.lock(), model_overlay.lock()) {
                     m.view.domain.x = l.x_domain;
-                    // Selection highlight (committed).
-                    if let Some((a, b)) = l.selection_x {
-                        let (px, py, pw, ph) = m.plot_rect(bounds.width, bounds.height);
-                        if pw > 0.0 && ph > 0.0 {
-                            let xa = m.view.x_to_px(a, px, pw);
-                            let xb = m.view.x_to_px(b, px, pw);
-                            let x0 = xa.min(xb).clamp(px, px + pw);
-                            let x1 = xa.max(xb).clamp(px, px + pw);
-                            ctx.fill_rect(
-                                Rect::new(x0, py, (x1 - x0).max(1.0), ph),
-                                0.0.into(),
-                                Brush::Solid(Color::rgba(1.0, 1.0, 1.0, 0.06)),
-                            );
-                        }
-                    }
-
-                    // Linked hover crosshair.
-                    if let Some(hx) = l.hover_x {
-                        let (px, _py, pw, _ph) = m.plot_rect(bounds.width, bounds.height);
-                        if pw > 0.0 {
-                            m.crosshair_x = Some(m.view.x_to_px(hx, px, pw));
-                        }
-                    }
                     m.render_overlay(ctx, bounds.width, bounds.height);
                 }
             })
