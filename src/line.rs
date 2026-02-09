@@ -37,6 +37,8 @@ pub struct LineChartStyle {
     pub crosshair: Color,
     pub text: Color,
     pub stroke_width: f32,
+    pub scroll_zoom_factor: f32,
+    pub pinch_zoom_min: f32,
 }
 
 impl Default for LineChartStyle {
@@ -48,6 +50,8 @@ impl Default for LineChartStyle {
             crosshair: Color::rgba(1.0, 1.0, 1.0, 0.35),
             text: Color::rgba(1.0, 1.0, 1.0, 0.85),
             stroke_width: 1.5,
+            scroll_zoom_factor: 0.02,
+            pinch_zoom_min: 0.01,
         }
     }
 }
@@ -141,7 +145,7 @@ impl LineChartModel {
         // Note: On desktop, pixel scroll deltas are normalized in the platform layer,
         // so use a larger factor to keep zoom responsive.
         let delta_y = delta_y.clamp(-250.0, 250.0);
-        let zoom = (-delta_y * 0.02).exp();
+        let zoom = (-delta_y * self.style.scroll_zoom_factor).exp();
         self.view.domain.x.zoom_about(pivot_x, zoom);
 
         // Prevent collapsing to 0 span.
@@ -157,7 +161,7 @@ impl LineChartModel {
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
 
         // EventContext::pinch_scale is "ratio delta per update (1.0 = no change)".
-        let zoom = scale_delta.max(0.01);
+        let zoom = scale_delta.max(self.style.pinch_zoom_min);
         self.view.domain.x.zoom_about(pivot_x, zoom);
         self.view.domain.x.clamp_span_min(1e-6);
     }

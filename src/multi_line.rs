@@ -20,6 +20,8 @@ pub struct MultiLineChartStyle {
 
     pub stroke_width: f32,
     pub series_alpha: f32,
+    pub scroll_zoom_factor: f32,
+    pub pinch_zoom_min: f32,
 
     /// Maximum number of series to draw as lines.
     ///
@@ -45,6 +47,8 @@ impl Default for MultiLineChartStyle {
             text: Color::rgba(1.0, 1.0, 1.0, 0.85),
             stroke_width: 1.0,
             series_alpha: 0.18,
+            scroll_zoom_factor: 0.02,
+            pinch_zoom_min: 0.01,
             max_series: 1_000,
             max_total_segments: 45_000,
             max_points_per_series: 2_048,
@@ -76,8 +80,8 @@ pub struct MultiLineChartModel {
 }
 
 impl MultiLineChartModel {
-    pub fn new(series: Vec<TimeSeriesF32>) -> Self {
-        assert!(
+    pub fn new(series: Vec<TimeSeriesF32>) -> anyhow::Result<Self> {
+        anyhow::ensure!(
             !series.is_empty(),
             "MultiLineChartModel requires at least 1 series"
         );
@@ -102,7 +106,7 @@ impl MultiLineChartModel {
         }
 
         let domain = Domain2D::new(Domain1D::new(x_min, x_max), Domain1D::new(y_min, y_max));
-        Self {
+        Ok(Self {
             series,
             view: ChartView::new(domain),
             style: MultiLineChartStyle::default(),
@@ -113,7 +117,7 @@ impl MultiLineChartModel {
             scratch_px: Vec::new(),
             scratch_runs: Vec::new(),
             downsample_params: DownsampleParams::default(),
-        }
+        })
     }
 
     pub fn set_gap_dx(&mut self, gap_dx: f32) {
@@ -146,7 +150,7 @@ impl MultiLineChartModel {
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
 
         let delta_y = delta_y.clamp(-250.0, 250.0);
-        let zoom = (-delta_y * 0.02).exp();
+        let zoom = (-delta_y * self.style.scroll_zoom_factor).exp();
         self.view.domain.x.zoom_about(pivot_x, zoom);
         self.view.domain.x.clamp_span_min(1e-6);
     }
@@ -159,7 +163,7 @@ impl MultiLineChartModel {
         let cursor_x_px = cursor_x_px.clamp(px, px + pw);
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
 
-        let zoom = scale_delta.max(0.01);
+        let zoom = scale_delta.max(self.style.pinch_zoom_min);
         self.view.domain.x.zoom_about(pivot_x, zoom);
         self.view.domain.x.clamp_span_min(1e-6);
     }
@@ -314,6 +318,16 @@ impl MultiLineChartModel {
             let style = TextStyle::new(12.0).with_color(self.style.text);
             ctx.draw_text(&text, Point::new(px + 6.0, py + 6.0), &style);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_rejects_empty_series() {
+        assert!(MultiLineChartModel::new(Vec::new()).is_err());
     }
 }
 
