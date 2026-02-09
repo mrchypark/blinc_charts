@@ -136,8 +136,12 @@ impl LineChartModel {
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
 
         // Trackpad/mouse wheel: delta_y > 0 typically means scroll down.
-        // Use exponential zoom so it feels consistent.
-        let zoom = (-delta_y * 0.0015).exp();
+        // Use exponential zoom so it feels consistent across devices.
+        //
+        // Note: On desktop, pixel scroll deltas are normalized in the platform layer,
+        // so use a larger factor to keep zoom responsive.
+        let delta_y = delta_y.clamp(-250.0, 250.0);
+        let zoom = (-delta_y * 0.02).exp();
         self.view.domain.x.zoom_about(pivot_x, zoom);
 
         // Prevent collapsing to 0 span.
