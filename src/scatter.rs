@@ -267,8 +267,17 @@ impl ScatterChartModel {
         draw_grid(ctx, px, py, pw, ph, self.style.grid, 4);
 
         self.ensure_samples(w, h);
+        // Avoid `fill_circle` here: circles go through the glass primitive path and
+        // quickly exceed the default `max_glass_primitives` budget. Render points as
+        // tiny rects so the primitive cost stays predictable.
+        let r = self.style.point_radius.max(0.5);
+        let d = r * 2.0;
         for p in &self.points_px {
-            ctx.fill_circle(*p, self.style.point_radius, Brush::Solid(self.style.points));
+            ctx.fill_rect(
+                Rect::new(p.x - r, p.y - r, d, d),
+                0.0.into(),
+                Brush::Solid(self.style.points),
+            );
         }
     }
 
