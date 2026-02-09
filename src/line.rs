@@ -6,6 +6,8 @@ use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::lod::{downsample_min_max, DownsampleParams};
+use crate::brush::BrushX;
+use crate::link::ChartLinkHandle;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
 
@@ -79,6 +81,8 @@ pub struct LineChartModel {
     // EventRouter's drag_delta_x/y are "offset from drag start", not per-frame deltas.
     // Track last observed totals so we can convert to incremental deltas for panning.
     last_drag_total_x: Option<f32>,
+
+    brush_x: BrushX,
 }
 
 impl LineChartModel {
@@ -108,6 +112,7 @@ impl LineChartModel {
             user_max_points: DownsampleParams::default().max_points,
             last_sample_key: None,
             last_drag_total_x: None,
+            brush_x: BrushX::default(),
         }
     }
 
@@ -199,6 +204,46 @@ impl LineChartModel {
         self.last_drag_total_x = None;
     }
 
+    pub fn on_mouse_down(&mut self, shift: bool, local_x: f32, w: f32, h: f32) {
+        if !shift {
+            return;
+        }
+        let (px, _py, pw, _ph) = self.plot_rect(w, h);
+        if pw <= 0.0 {
+            return;
+        }
+        self.brush_x.begin(local_x.clamp(px, px + pw));
+        self.last_drag_total_x = None;
+    }
+
+    pub fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+        if !self.brush_x.is_active() {
+            return;
+        }
+        let (px, _py, pw, _ph) = self.plot_rect(w, h);
+        if pw <= 0.0 {
+            return;
+        }
+        // Brush updates track cursor position. DRAG provides delta-from-start, so infer current x.
+        let Some(start_x) = self.brush_x.anchor_px() else {
+            return;
+        };
+        let x = start_x + drag_total_dx;
+        self.brush_x.update(x.clamp(px, px + pw));
+    }
+
+    pub fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
+        let (px, _py, pw, _ph) = self.plot_rect(w, h);
+        if pw <= 0.0 {
+            self.brush_x.cancel();
+            return None;
+        }
+        let (a_px, b_px) = self.brush_x.take_final_px()?;
+        let a = self.view.px_to_x(a_px, px, pw);
+        let b = self.view.px_to_x(b_px, px, pw);
+        Some(if a <= b { (a, b) } else { (b, a) })
+    }
+
     fn ensure_samples(&mut self, w: f32, h: f32) {
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
@@ -286,6 +331,17 @@ impl LineChartModel {
             return;
         }
 
+        // In-progress brush (X-only).
+        if let Some((a, b)) = self.brush_x.range_px() {
+            let x = a.clamp(px, px + pw);
+            let w = (b - a).abs().max(1.0);
+            ctx.fill_rect(
+                Rect::new(x.min(px + pw), py, w.min(pw), ph),
+                0.0.into(),
+                Brush::Solid(Color::rgba(0.35, 0.65, 1.0, 0.10)),
+            );
+        }
+
         // Crosshair
         if let Some(cx) = self.crosshair_x {
             let x = cx.clamp(px, px + pw);
@@ -335,7 +391,9 @@ pub fn line_chart(handle: LineChartHandle) -> impl ElementBuilder {
     let model_move = handle.0.clone();
     let model_scroll = handle.0.clone();
     let model_pinch = handle.0.clone();
+    let model_down = handle.0.clone();
     let model_drag = handle.0.clone();
+    let model_up = handle.0.clone();
     let model_drag_end = handle.0.clone();
 
     stack()
@@ -346,6 +404,12 @@ pub fn line_chart(handle: LineChartHandle) -> impl ElementBuilder {
         .on_mouse_move(move |e| {
             if let Ok(mut m) = model_move.lock() {
                 m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
+                blinc_layout::stateful::request_redraw();
+            }
+        })
+        .on_mouse_down(move |e| {
+            if let Ok(mut m) = model_down.lock() {
+                m.on_mouse_down(e.shift, e.local_x, e.bounds_width, e.bounds_height);
                 blinc_layout::stateful::request_redraw();
             }
         })
@@ -363,7 +427,18 @@ pub fn line_chart(handle: LineChartHandle) -> impl ElementBuilder {
         })
         .on_drag(move |e| {
             if let Ok(mut m) = model_drag.lock() {
-                m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
+                if e.shift {
+                    m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
+                } else {
+                    m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
+                }
+                blinc_layout::stateful::request_redraw();
+            }
+        })
+        .on_mouse_up(move |_e| {
+            if let Ok(mut m) = model_up.lock() {
+                let _ = m.on_mouse_up_finish_brush_x(_e.bounds_width, _e.bounds_height);
+                m.on_drag_end();
                 blinc_layout::stateful::request_redraw();
             }
         })
@@ -384,6 +459,149 @@ pub fn line_chart(handle: LineChartHandle) -> impl ElementBuilder {
         .child(
             canvas(move |ctx, bounds| {
                 if let Ok(mut m) = model_overlay.lock() {
+                    m.render_overlay(ctx, bounds.width, bounds.height);
+                }
+            })
+            .w_full()
+            .h_full()
+            .foreground(),
+        )
+}
+
+/// Create a linked line chart element.
+///
+/// Additional behaviors:
+/// - Pan/zoom is synchronized via `link.x_domain` (shared X domain).
+/// - Hover is broadcast via `link.hover_x`.
+/// - Selection (brush) is created with Shift+Drag and stored in `link.selection_x`.
+pub fn linked_line_chart(handle: LineChartHandle, link: ChartLinkHandle) -> impl ElementBuilder {
+    let model_plot = handle.0.clone();
+    let model_overlay = handle.0.clone();
+
+    let model_move = handle.0.clone();
+    let model_scroll = handle.0.clone();
+    let model_pinch = handle.0.clone();
+    let model_down = handle.0.clone();
+    let model_drag = handle.0.clone();
+    let model_up = handle.0.clone();
+    let model_drag_end = handle.0.clone();
+
+    let link_move = link.clone();
+    let link_scroll = link.clone();
+    let link_pinch = link.clone();
+    let link_down = link.clone();
+    let link_drag = link.clone();
+    let link_up = link.clone();
+    let link_plot = link.clone();
+    let link_overlay = link.clone();
+
+    stack()
+        .w_full()
+        .h_full()
+        .overflow_clip()
+        .cursor(blinc_layout::element::CursorStyle::Crosshair)
+        .on_mouse_move(move |e| {
+            if let (Ok(mut l), Ok(mut m)) = (link_move.lock(), model_move.lock()) {
+                m.view.domain.x = l.x_domain;
+                m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
+
+                // Publish hover x in domain units (or None when out of plot).
+                let (px, _py, pw, _ph) = m.plot_rect(e.bounds_width, e.bounds_height);
+                if pw > 0.0 && m.crosshair_x.is_some() {
+                    let x = m.view.px_to_x(e.local_x.clamp(px, px + pw), px, pw);
+                    l.set_hover_x(Some(x));
+                } else {
+                    l.set_hover_x(None);
+                }
+                blinc_layout::stateful::request_redraw();
+            }
+        })
+        .on_mouse_down(move |e| {
+            if let (Ok(_l), Ok(mut m)) = (link_down.lock(), model_down.lock()) {
+                m.on_mouse_down(e.shift, e.local_x, e.bounds_width, e.bounds_height);
+                blinc_layout::stateful::request_redraw();
+            }
+        })
+        .on_scroll(move |e| {
+            if let (Ok(mut l), Ok(mut m)) = (link_scroll.lock(), model_scroll.lock()) {
+                m.view.domain.x = l.x_domain;
+                m.on_scroll(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
+                l.set_x_domain(m.view.domain.x);
+                blinc_layout::stateful::request_redraw();
+            }
+        })
+        .on_pinch(move |e| {
+            if let (Ok(mut l), Ok(mut m)) = (link_pinch.lock(), model_pinch.lock()) {
+                m.view.domain.x = l.x_domain;
+                m.on_pinch(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
+                l.set_x_domain(m.view.domain.x);
+                blinc_layout::stateful::request_redraw();
+            }
+        })
+        .on_drag(move |e| {
+            if let (Ok(mut l), Ok(mut m)) = (link_drag.lock(), model_drag.lock()) {
+                m.view.domain.x = l.x_domain;
+                if e.shift {
+                    m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
+                } else {
+                    m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
+                    l.set_x_domain(m.view.domain.x);
+                }
+                blinc_layout::stateful::request_redraw();
+            }
+        })
+        .on_mouse_up(move |e| {
+            if let (Ok(mut l), Ok(mut m)) = (link_up.lock(), model_up.lock()) {
+                m.view.domain.x = l.x_domain;
+                if let Some(sel) = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height) {
+                    l.set_selection_x(Some(sel));
+                }
+                m.on_drag_end();
+                blinc_layout::stateful::request_redraw();
+            }
+        })
+        .on_drag_end(move |_e| {
+            if let Ok(mut m) = model_drag_end.lock() {
+                m.on_drag_end();
+            }
+        })
+        .child(
+            canvas(move |ctx, bounds| {
+                if let (Ok(l), Ok(mut m)) = (link_plot.lock(), model_plot.lock()) {
+                    m.view.domain.x = l.x_domain;
+                    m.render_plot(ctx, bounds.width, bounds.height);
+                }
+            })
+            .w_full()
+            .h_full(),
+        )
+        .child(
+            canvas(move |ctx, bounds| {
+                if let (Ok(l), Ok(mut m)) = (link_overlay.lock(), model_overlay.lock()) {
+                    m.view.domain.x = l.x_domain;
+                    // Selection highlight (committed).
+                    if let Some((a, b)) = l.selection_x {
+                        let (px, py, pw, ph) = m.plot_rect(bounds.width, bounds.height);
+                        if pw > 0.0 && ph > 0.0 {
+                            let xa = m.view.x_to_px(a, px, pw);
+                            let xb = m.view.x_to_px(b, px, pw);
+                            let x0 = xa.min(xb).clamp(px, px + pw);
+                            let x1 = xa.max(xb).clamp(px, px + pw);
+                            ctx.fill_rect(
+                                Rect::new(x0, py, (x1 - x0).max(1.0), ph),
+                                0.0.into(),
+                                Brush::Solid(Color::rgba(1.0, 1.0, 1.0, 0.06)),
+                            );
+                        }
+                    }
+
+                    // Linked hover crosshair.
+                    if let Some(hx) = l.hover_x {
+                        let (px, _py, pw, _ph) = m.plot_rect(bounds.width, bounds.height);
+                        if pw > 0.0 {
+                            m.crosshair_x = Some(m.view.x_to_px(hx, px, pw));
+                        }
+                    }
                     m.render_overlay(ctx, bounds.width, bounds.height);
                 }
             })
