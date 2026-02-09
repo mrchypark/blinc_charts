@@ -77,7 +77,10 @@ pub struct MultiLineChartModel {
 
 impl MultiLineChartModel {
     pub fn new(series: Vec<TimeSeriesF32>) -> Self {
-        assert!(!series.is_empty(), "MultiLineChartModel requires at least 1 series");
+        assert!(
+            !series.is_empty(),
+            "MultiLineChartModel requires at least 1 series"
+        );
 
         let mut x_min = f32::INFINITY;
         let mut x_max = f32::NEG_INFINITY;
@@ -261,7 +264,8 @@ impl MultiLineChartModel {
             self.scratch_px.clear();
             self.scratch_px.reserve(self.scratch_data.len());
             for p in &self.scratch_data {
-                self.scratch_px.push(self.view.data_to_px(*p, px, py, pw, ph));
+                self.scratch_px
+                    .push(self.view.data_to_px(*p, px, py, pw, ph));
             }
 
             // Split runs on missing data gaps.
@@ -279,11 +283,7 @@ impl MultiLineChartModel {
                 if need > remaining_segments {
                     let end = a + remaining_segments + 1;
                     if end > a + 1 && end <= b {
-                        ctx.stroke_polyline(
-                            &self.scratch_px[a..end],
-                            &stroke,
-                            Brush::Solid(color),
-                        );
+                        ctx.stroke_polyline(&self.scratch_px[a..end], &stroke, Brush::Solid(color));
                         remaining_segments = 0;
                     }
                     break;

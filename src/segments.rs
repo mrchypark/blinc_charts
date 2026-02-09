@@ -13,7 +13,11 @@ pub fn runs_by_gap(points: &[Point], gap_dx: f32, out: &mut Vec<(usize, usize)>)
         return;
     }
 
-    let gap_dx = if gap_dx.is_finite() { gap_dx } else { f32::INFINITY };
+    let gap_dx = if gap_dx.is_finite() {
+        gap_dx
+    } else {
+        f32::INFINITY
+    };
 
     let mut start = 0usize;
     for i in 1..points.len() {
@@ -72,4 +76,3 @@ mod tests {
         assert_eq!(runs, vec![(0, 1)]);
     }
 }
-
