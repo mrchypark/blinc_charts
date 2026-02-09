@@ -24,8 +24,10 @@ impl Default for HeatmapChartStyle {
             bg: Color::rgba(0.08, 0.09, 0.11, 1.0),
             grid: Color::rgba(1.0, 1.0, 1.0, 0.08),
             text: Color::rgba(1.0, 1.0, 1.0, 0.85),
-            max_cells_x: 256,
-            max_cells_y: 192,
+            // Keep total rect count <= ~8k so we don't overrun Blinc's default
+            // `max_primitives` buffer (this is a demo renderer, not an image-based one).
+            max_cells_x: 128,
+            max_cells_y: 64,
         }
     }
 }

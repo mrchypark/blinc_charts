@@ -55,7 +55,9 @@ impl Default for ScatterChartStyle {
             point_radius: 1.5,
             scroll_zoom_factor: 0.02,
             pinch_zoom_min: 0.01,
-            max_points: 50_000,
+            // Each point is currently rendered as a separate GPU primitive.
+            // Keep this below the default renderer primitive budget.
+            max_points: 8_000,
         }
     }
 }
