@@ -71,6 +71,10 @@ pub struct LineChartModel {
     // Cache key for (re)sampling. Hover-only interactions should not force
     // downsampling or point transforms on every frame.
     last_sample_key: Option<SampleKey>,
+
+    // EventRouter's drag_delta_x/y are "offset from drag start", not per-frame deltas.
+    // Track last observed totals so we can convert to incremental deltas for panning.
+    last_drag_total_x: Option<f32>,
 }
 
 impl LineChartModel {
@@ -89,6 +93,7 @@ impl LineChartModel {
             downsample_params: DownsampleParams::default(),
             user_max_points: DownsampleParams::default().max_points,
             last_sample_key: None,
+            last_drag_total_x: None,
         }
     }
 
@@ -153,14 +158,27 @@ impl LineChartModel {
         self.view.domain.x.clamp_span_min(1e-6);
     }
 
-    pub fn on_drag_pan(&mut self, drag_dx: f32, w: f32, h: f32) {
+    /// Pan using drag "total delta from start" (EventContext::drag_delta_x).
+    pub fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
         let (_px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
             return;
         }
+
+        // Convert total-from-start to incremental delta since last event.
+        let prev = self.last_drag_total_x.replace(drag_total_dx);
+        let drag_dx = match prev {
+            Some(p) => drag_total_dx - p,
+            None => 0.0,
+        };
+
         // Convert pixel delta to domain delta.
         let dx = -drag_dx / pw * self.view.domain.x.span();
         self.view.domain.x.pan_by(dx);
+    }
+
+    pub fn on_drag_end(&mut self) {
+        self.last_drag_total_x = None;
     }
 
     fn ensure_samples(&mut self, w: f32, h: f32) {
@@ -300,6 +318,7 @@ pub fn line_chart(handle: LineChartHandle) -> impl ElementBuilder {
     let model_scroll = handle.0.clone();
     let model_pinch = handle.0.clone();
     let model_drag = handle.0.clone();
+    let model_drag_end = handle.0.clone();
 
     stack()
         .w_full()
@@ -326,8 +345,13 @@ pub fn line_chart(handle: LineChartHandle) -> impl ElementBuilder {
         })
         .on_drag(move |e| {
             if let Ok(mut m) = model_drag.lock() {
-                m.on_drag_pan(e.drag_delta_x, e.bounds_width, e.bounds_height);
+                m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
                 blinc_layout::stateful::request_redraw();
+            }
+        })
+        .on_drag_end(move |_e| {
+            if let Ok(mut m) = model_drag_end.lock() {
+                m.on_drag_end();
             }
         })
         .child(
