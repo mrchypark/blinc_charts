@@ -115,11 +115,16 @@ impl HeatmapChartModel {
         // Fit to screen to keep cost bounded.
         let cells_x = self.grid_w.min(self.style.max_cells_x);
         let cells_y = self.grid_h.min(self.style.max_cells_y);
-        let step_x = (self.grid_w as f32 / cells_x as f32).max(1.0) as usize;
-        let step_y = (self.grid_h as f32 / cells_y as f32).max(1.0) as usize;
+        // Choose steps so the sampled grid does not exceed max_cells_{x,y}.
+        // Use integer ceil-div to avoid oversampling due to float truncation.
+        let step_x = ((self.grid_w + cells_x - 1) / cells_x).max(1);
+        let step_y = ((self.grid_h + cells_y - 1) / cells_y).max(1);
 
-        let cell_w = (pw / (self.grid_w as f32 / step_x as f32)).max(1.0);
-        let cell_h = (ph / (self.grid_h as f32 / step_y as f32)).max(1.0);
+        let sampled_w = ((self.grid_w + step_x - 1) / step_x).max(1) as f32;
+        let sampled_h = ((self.grid_h + step_y - 1) / step_y).max(1) as f32;
+
+        let cell_w = (pw / sampled_w).max(1.0);
+        let cell_h = (ph / sampled_h).max(1.0);
 
         for gy in (0..self.grid_h).step_by(step_y) {
             for gx in (0..self.grid_w).step_by(step_x) {
