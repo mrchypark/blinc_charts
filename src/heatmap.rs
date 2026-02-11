@@ -97,7 +97,7 @@ impl HeatmapChartModel {
             let u = (t - 0.66) / 0.34;
             (0.95, 0.80 - 0.65 * u, 0.20)
         };
-        Color::rgba(r, g, b, 0.95)
+        Color::rgba(r, g, b, 1.0)
     }
 
     pub fn render_plot(&self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
@@ -113,8 +113,24 @@ impl HeatmapChartModel {
         let inv = 1.0 / (vmax - vmin).max(1e-12);
 
         // Fit to screen to keep cost bounded.
-        let cells_x = self.grid_w.min(self.style.max_cells_x);
-        let cells_y = self.grid_h.min(self.style.max_cells_y);
+        //
+        // Additionally, on very small plot areas we reduce the cell count so each
+        // cell remains visible (thin 1px-tall cells can become hard to see after
+        // rounding and clipping).
+        let mut cells_x = self.grid_w.min(self.style.max_cells_x);
+        let mut cells_y = self.grid_h.min(self.style.max_cells_y);
+
+        let min_cell_px = 2.0;
+        let max_by_w = (pw / min_cell_px).floor() as usize;
+        let max_by_h = (ph / min_cell_px).floor() as usize;
+        if max_by_w > 0 {
+            cells_x = cells_x.min(max_by_w);
+        }
+        if max_by_h > 0 {
+            cells_y = cells_y.min(max_by_h);
+        }
+        cells_x = cells_x.max(1);
+        cells_y = cells_y.max(1);
         // Choose steps so the sampled grid does not exceed max_cells_{x,y}.
         // Use integer ceil-div to avoid oversampling due to float truncation.
         let step_x = ((self.grid_w + cells_x - 1) / cells_x).max(1);
@@ -125,6 +141,52 @@ impl HeatmapChartModel {
 
         let cell_w = (pw / sampled_w).max(1.0);
         let cell_h = (ph / sampled_h).max(1.0);
+
+        if std::env::var_os("BLINC_DEBUG_HEATMAP").is_some() {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static LOGS: AtomicU32 = AtomicU32::new(0);
+            let n = LOGS.fetch_add(1, Ordering::Relaxed);
+            if n < 3 {
+                let mut svmin = f32::INFINITY;
+                let mut svmax = f32::NEG_INFINITY;
+                for gy in (0..self.grid_h).step_by(step_y) {
+                    for gx in (0..self.grid_w).step_by(step_x) {
+                        let v = self.values[gy * self.grid_w + gx];
+                        if v.is_finite() {
+                            svmin = svmin.min(v);
+                            svmax = svmax.max(v);
+                        }
+                    }
+                }
+                let t_max = if svmax.is_finite() {
+                    ((svmax - vmin) * inv).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                tracing::info!(
+                    "heatmap: bounds=({w:.1}x{h:.1}) plot=({pw:.1}x{ph:.1}) cells=({cells_x}x{cells_y}) step=({step_x}x{step_y}) sampled=({sampled_w:.0}x{sampled_h:.0}) cell=({cell_w:.2}x{cell_h:.2}) v=({vmin:.3}..{vmax:.3}) sv=({svmin:.3}..{svmax:.3}) t_max={t_max:.3}",
+                );
+            }
+        }
+
+        if std::env::var_os("BLINC_DEBUG_HEATMAP_MARKER").is_some() {
+            // Draw a small marker in the plot center to verify clipping + color correctness.
+            let s = 6.0;
+            ctx.fill_rect(
+                Rect::new(px + pw * 0.5 - s * 0.5, py + ph * 0.5 - s * 0.5, s, s),
+                0.0.into(),
+                Brush::Solid(Color::rgba(1.0, 0.0, 0.0, 1.0)),
+            );
+        }
+
+        // Debug: force cells into the foreground layer to test ordering issues.
+        // This can help diagnose cases where many opaque rects get overwritten
+        // due to GPU primitive ordering within a single instanced draw call.
+        let debug_foreground_cells =
+            std::env::var_os("BLINC_DEBUG_HEATMAP_FOREGROUND_CELLS").is_some();
+        if debug_foreground_cells {
+            ctx.set_foreground_layer(true);
+        }
 
         for gy in (0..self.grid_h).step_by(step_y) {
             for gx in (0..self.grid_w).step_by(step_x) {
@@ -147,6 +209,10 @@ impl HeatmapChartModel {
         let text = format!("grid={}x{} (screen-sampled)", self.grid_w, self.grid_h);
         let style = TextStyle::new(12.0).with_color(self.style.text);
         ctx.draw_text(&text, Point::new(px + 6.0, py + 6.0), &style);
+
+        if debug_foreground_cells {
+            ctx.set_foreground_layer(false);
+        }
     }
 }
 

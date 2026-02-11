@@ -23,6 +23,15 @@ pub mod histogram;
 pub mod line;
 pub mod multi_line;
 pub mod scatter;
+pub mod contour;
+pub mod density_map;
+pub mod gauge;
+pub mod geo;
+pub mod hierarchy;
+pub mod network;
+pub mod polar;
+pub mod stacked_area;
+pub mod statistics;
 
 pub use brush::BrushX;
 pub use candlestick::{Candle, CandleSeries};
@@ -44,8 +53,18 @@ pub mod prelude {
         candlestick_chart, linked_candlestick_chart, Candle, CandleSeries, CandlestickChartHandle,
         CandlestickChartModel, CandlestickChartStyle,
     };
+    pub use crate::contour::{contour_chart, ContourChartHandle, ContourChartModel, ContourChartStyle};
+    pub use crate::density_map::{
+        density_map_chart, DensityMapChartHandle, DensityMapChartModel, DensityMapChartStyle,
+    };
+    pub use crate::gauge::{funnel_chart, gauge_chart, FunnelChartHandle, FunnelChartModel, FunnelChartStyle, GaugeChartHandle, GaugeChartModel, GaugeChartStyle};
+    pub use crate::geo::{geo_chart, GeoChartHandle, GeoChartModel, GeoChartStyle};
     pub use crate::heatmap::{
         heatmap_chart, HeatmapChartHandle, HeatmapChartModel, HeatmapChartStyle,
+    };
+    pub use crate::hierarchy::{
+        hierarchy_chart, HierarchyChartHandle, HierarchyChartModel, HierarchyChartStyle,
+        HierarchyNode, HierarchyMode,
     };
     pub use crate::histogram::{
         histogram_chart, HistogramChartHandle, HistogramChartModel, HistogramChartStyle,
@@ -58,9 +77,20 @@ pub mod prelude {
         linked_multi_line_chart, multi_line_chart, MultiLineChartHandle, MultiLineChartModel,
         MultiLineChartStyle,
     };
+    pub use crate::network::{
+        network_chart, NetworkChartHandle, NetworkChartModel, NetworkChartStyle, NetworkMode,
+    };
+    pub use crate::polar::{polar_chart, PolarChartHandle, PolarChartModel, PolarChartMode, PolarChartStyle};
     pub use crate::scatter::{
         linked_scatter_chart, scatter_chart, ScatterChartHandle, ScatterChartModel,
         ScatterChartStyle,
+    };
+    pub use crate::stacked_area::{
+        linked_stacked_area_chart, stacked_area_chart, StackedAreaChartHandle,
+        StackedAreaChartModel, StackedAreaChartStyle, StackedAreaMode,
+    };
+    pub use crate::statistics::{
+        statistics_chart, StatisticsChartHandle, StatisticsChartModel, StatisticsChartStyle,
     };
     pub use crate::time_series::TimeSeriesF32;
     pub use crate::view::{ChartView, Domain1D, Domain2D};
