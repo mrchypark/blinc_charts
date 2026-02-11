@@ -1,8 +1,6 @@
 use std::sync::{Arc, Mutex};
 
 use blinc_core::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
-use blinc_layout::canvas::canvas;
-use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::brush::BrushX;
@@ -11,6 +9,7 @@ use crate::link::ChartLinkHandle;
 use crate::lod::{downsample_min_max, DownsampleParams};
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
+use crate::xy_stack::InteractiveXChartModel;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SampleKey {
@@ -324,6 +323,68 @@ impl AreaChartModel {
     }
 }
 
+impl InteractiveXChartModel for AreaChartModel {
+    fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
+        AreaChartModel::on_mouse_move(self, local_x, local_y, w, h);
+    }
+
+    fn on_mouse_down(&mut self, brush_modifier: bool, local_x: f32, w: f32, h: f32) {
+        AreaChartModel::on_mouse_down(self, brush_modifier, local_x, w, h);
+    }
+
+    fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
+        AreaChartModel::on_scroll(self, delta_y, cursor_x_px, w, h);
+    }
+
+    fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
+        AreaChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h);
+    }
+
+    fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+        AreaChartModel::on_drag_pan_total(self, drag_total_dx, w, h);
+    }
+
+    fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+        AreaChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h);
+    }
+
+    fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
+        AreaChartModel::on_mouse_up_finish_brush_x(self, w, h)
+    }
+
+    fn on_drag_end(&mut self) {
+        AreaChartModel::on_drag_end(self);
+    }
+
+    fn render_plot(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
+        AreaChartModel::render_plot(self, ctx, w, h);
+    }
+
+    fn render_overlay(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
+        AreaChartModel::render_overlay(self, ctx, w, h);
+    }
+
+    fn plot_rect(&self, w: f32, h: f32) -> (f32, f32, f32, f32) {
+        self.view.plot_rect(w, h)
+    }
+
+    fn view(&self) -> &ChartView {
+        &self.view
+    }
+
+    fn view_mut(&mut self) -> &mut ChartView {
+        &mut self.view
+    }
+
+    fn crosshair_x_mut(&mut self) -> &mut Option<f32> {
+        &mut self.crosshair_x
+    }
+
+    fn is_brushing(&self) -> bool {
+        self.brush_x.is_active()
+    }
+}
+
 #[derive(Clone)]
 pub struct AreaChartHandle(pub Arc<Mutex<AreaChartModel>>);
 
@@ -334,198 +395,24 @@ impl AreaChartHandle {
 }
 
 pub fn area_chart(handle: AreaChartHandle) -> impl ElementBuilder {
-    let model_plot = handle.0.clone();
-    let model_overlay = handle.0.clone();
+    area_chart_with_bindings(handle, crate::ChartInputBindings::default())
+}
 
-    let model_move = handle.0.clone();
-    let model_scroll = handle.0.clone();
-    let model_pinch = handle.0.clone();
-    let model_down = handle.0.clone();
-    let model_drag = handle.0.clone();
-    let model_up = handle.0.clone();
-    let model_drag_end = handle.0.clone();
-
-    stack()
-        .w_full()
-        .h_full()
-        .overflow_clip()
-        .cursor(blinc_layout::element::CursorStyle::Crosshair)
-        .on_mouse_move(move |e| {
-            if let Ok(mut m) = model_move.lock() {
-                m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_down(move |e| {
-            if let Ok(mut m) = model_down.lock() {
-                m.on_mouse_down(e.shift, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_scroll(move |e| {
-            if let Ok(mut m) = model_scroll.lock() {
-                m.on_scroll(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_pinch(move |e| {
-            if let Ok(mut m) = model_pinch.lock() {
-                m.on_pinch(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag(move |e| {
-            if let Ok(mut m) = model_drag.lock() {
-                if e.shift {
-                    m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                } else {
-                    m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                }
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_up(move |e| {
-            if let Ok(mut m) = model_up.lock() {
-                let _ = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height);
-                m.on_drag_end();
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag_end(move |_e| {
-            if let Ok(mut m) = model_drag_end.lock() {
-                m.on_drag_end();
-            }
-        })
-        .child(
-            canvas(move |ctx, bounds| {
-                if let Ok(mut m) = model_plot.lock() {
-                    m.render_plot(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full(),
-        )
-        .child(
-            canvas(move |ctx, bounds| {
-                if let Ok(mut m) = model_overlay.lock() {
-                    m.render_overlay(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full()
-            .foreground(),
-        )
+pub fn area_chart_with_bindings(
+    handle: AreaChartHandle,
+    bindings: crate::ChartInputBindings,
+) -> impl ElementBuilder {
+    crate::xy_stack::x_chart(handle.0, bindings)
 }
 
 pub fn linked_area_chart(handle: AreaChartHandle, link: ChartLinkHandle) -> impl ElementBuilder {
-    let model_plot = handle.0.clone();
-    let model_overlay = handle.0.clone();
+    linked_area_chart_with_bindings(handle, link, crate::ChartInputBindings::default())
+}
 
-    let model_move = handle.0.clone();
-    let model_scroll = handle.0.clone();
-    let model_pinch = handle.0.clone();
-    let model_down = handle.0.clone();
-    let model_drag = handle.0.clone();
-    let model_up = handle.0.clone();
-    let model_drag_end = handle.0.clone();
-
-    let link_move = link.clone();
-    let link_scroll = link.clone();
-    let link_pinch = link.clone();
-    let link_down = link.clone();
-    let link_drag = link.clone();
-    let link_up = link.clone();
-    let link_plot = link.clone();
-    let link_overlay = link.clone();
-
-    stack()
-        .w_full()
-        .h_full()
-        .overflow_clip()
-        .cursor(blinc_layout::element::CursorStyle::Crosshair)
-        .on_mouse_move(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_move.lock(), model_move.lock()) {
-                m.view.domain.x = l.x_domain;
-                m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
-
-                let (px, _py, pw, _ph) = m.plot_rect(e.bounds_width, e.bounds_height);
-                if pw > 0.0 && m.crosshair_x.is_some() {
-                    let x = m.view.px_to_x(e.local_x.clamp(px, px + pw), px, pw);
-                    l.set_hover_x(Some(x));
-                } else {
-                    l.set_hover_x(None);
-                }
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_down(move |e| {
-            if let (Ok(_l), Ok(mut m)) = (link_down.lock(), model_down.lock()) {
-                m.on_mouse_down(e.shift, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_scroll(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_scroll.lock(), model_scroll.lock()) {
-                m.view.domain.x = l.x_domain;
-                m.on_scroll(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
-                l.set_x_domain(m.view.domain.x);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_pinch(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_pinch.lock(), model_pinch.lock()) {
-                m.view.domain.x = l.x_domain;
-                m.on_pinch(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
-                l.set_x_domain(m.view.domain.x);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_drag.lock(), model_drag.lock()) {
-                m.view.domain.x = l.x_domain;
-                if e.shift {
-                    m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                } else {
-                    m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                    l.set_x_domain(m.view.domain.x);
-                }
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_up(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_up.lock(), model_up.lock()) {
-                if let Some((a, b)) = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height)
-                {
-                    l.set_selection_x(Some((a, b)));
-                }
-                m.on_drag_end();
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag_end(move |_e| {
-            if let Ok(mut m) = model_drag_end.lock() {
-                m.on_drag_end();
-            }
-        })
-        .child(
-            canvas(move |ctx, bounds| {
-                if let (Ok(l), Ok(mut m)) = (link_plot.lock(), model_plot.lock()) {
-                    m.view.domain.x = l.x_domain;
-                    m.render_plot(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full(),
-        )
-        .child(
-            canvas(move |ctx, bounds| {
-                if let (Ok(l), Ok(mut m)) = (link_overlay.lock(), model_overlay.lock()) {
-                    m.view.domain.x = l.x_domain;
-                    m.render_overlay(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full()
-            .foreground(),
-        )
+pub fn linked_area_chart_with_bindings(
+    handle: AreaChartHandle,
+    link: ChartLinkHandle,
+    bindings: crate::ChartInputBindings,
+) -> impl ElementBuilder {
+    crate::xy_stack::linked_x_chart(handle.0, link, bindings)
 }

@@ -5,6 +5,7 @@ use blinc_layout::canvas::canvas;
 use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
+use crate::brush::BrushRect;
 use crate::common::{draw_grid, fill_bg};
 use crate::view::{ChartView, Domain1D, Domain2D};
 
@@ -28,57 +29,6 @@ impl BinKey {
             bins_w: bins_w as u32,
             bins_h: bins_h as u32,
         }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct BrushRect {
-    active: bool,
-    start_x: f32,
-    start_y: f32,
-    cur_x: f32,
-    cur_y: f32,
-}
-
-impl BrushRect {
-    fn is_active(&self) -> bool {
-        self.active
-    }
-
-    fn begin(&mut self, x_px: f32, y_px: f32) {
-        self.active = true;
-        self.start_x = x_px;
-        self.start_y = y_px;
-        self.cur_x = x_px;
-        self.cur_y = y_px;
-    }
-
-    fn update(&mut self, x_px: f32, y_px: f32) {
-        if self.active {
-            self.cur_x = x_px;
-            self.cur_y = y_px;
-        }
-    }
-
-    fn cancel(&mut self) {
-        self.active = false;
-    }
-
-    fn rect_px(&self) -> Option<(f32, f32, f32, f32)> {
-        if !self.active {
-            return None;
-        }
-        let x0 = self.start_x.min(self.cur_x);
-        let x1 = self.start_x.max(self.cur_x);
-        let y0 = self.start_y.min(self.cur_y);
-        let y1 = self.start_y.max(self.cur_y);
-        Some((x0, y0, x1, y1))
-    }
-
-    fn take_final_px(&mut self) -> Option<(f32, f32, f32, f32)> {
-        let r = self.rect_px();
-        self.active = false;
-        r
     }
 }
 
@@ -307,10 +257,13 @@ impl DensityMapChartModel {
         if pw <= 0.0 || ph <= 0.0 {
             return;
         }
+        let Some((anchor_x, anchor_y)) = self.brush.anchor_px() else {
+            return;
+        };
         // DRAG provides delta-from-start, so infer current from anchor.
         self.brush.update(
-            (self.brush.start_x + drag_total_dx).clamp(px, px + pw),
-            (self.brush.start_y + drag_total_dy).clamp(py, py + ph),
+            (anchor_x + drag_total_dx).clamp(px, px + pw),
+            (anchor_y + drag_total_dy).clamp(py, py + ph),
         );
     }
 

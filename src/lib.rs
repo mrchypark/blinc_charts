@@ -9,11 +9,13 @@
 
 mod brush;
 mod common;
+pub mod input;
 mod link;
 mod lod;
 mod segments;
 mod time_series;
 mod view;
+mod xy_stack;
 
 pub mod area;
 pub mod bar;
@@ -35,6 +37,7 @@ pub mod statistics;
 
 pub use brush::BrushX;
 pub use candlestick::{Candle, CandleSeries};
+pub use input::{ChartInputBindings, DragAction, DragBinding, ModifiersReq};
 pub use link::{chart_link, ChartLink, ChartLinkHandle};
 pub use lod::{downsample_min_max, DownsampleParams};
 pub use segments::runs_by_gap;
@@ -44,13 +47,16 @@ pub use view::{ChartView, Domain1D, Domain2D};
 /// Common imports for chart users.
 pub mod prelude {
     pub use crate::area::{
-        area_chart, linked_area_chart, AreaChartHandle, AreaChartModel, AreaChartStyle,
+        area_chart, area_chart_with_bindings, linked_area_chart, linked_area_chart_with_bindings,
+        AreaChartHandle, AreaChartModel, AreaChartStyle,
     };
     pub use crate::bar::{
-        bar_chart, linked_bar_chart, BarChartHandle, BarChartModel, BarChartStyle,
+        bar_chart, bar_chart_with_bindings, linked_bar_chart, linked_bar_chart_with_bindings,
+        BarChartHandle, BarChartModel, BarChartStyle,
     };
     pub use crate::candlestick::{
-        candlestick_chart, linked_candlestick_chart, Candle, CandleSeries, CandlestickChartHandle,
+        candlestick_chart, candlestick_chart_with_bindings, linked_candlestick_chart,
+        linked_candlestick_chart_with_bindings, Candle, CandleSeries, CandlestickChartHandle,
         CandlestickChartModel, CandlestickChartStyle,
     };
     pub use crate::contour::{contour_chart, ContourChartHandle, ContourChartModel, ContourChartStyle};
@@ -67,14 +73,17 @@ pub mod prelude {
         HierarchyNode, HierarchyMode,
     };
     pub use crate::histogram::{
-        histogram_chart, HistogramChartHandle, HistogramChartModel, HistogramChartStyle,
+        histogram_chart, histogram_chart_with_bindings, HistogramChartHandle, HistogramChartModel,
+        HistogramChartStyle,
     };
     pub use crate::line::{
-        line_chart, linked_line_chart, LineChartHandle, LineChartModel, LineChartStyle,
+        line_chart, line_chart_with_bindings, linked_line_chart, linked_line_chart_with_bindings,
+        LineChartHandle, LineChartModel, LineChartStyle,
     };
     pub use crate::link::{chart_link, ChartLink, ChartLinkHandle};
     pub use crate::multi_line::{
-        linked_multi_line_chart, multi_line_chart, MultiLineChartHandle, MultiLineChartModel,
+        linked_multi_line_chart, linked_multi_line_chart_with_bindings, multi_line_chart,
+        multi_line_chart_with_bindings, MultiLineChartHandle, MultiLineChartModel,
         MultiLineChartStyle,
     };
     pub use crate::network::{
@@ -82,16 +91,19 @@ pub mod prelude {
     };
     pub use crate::polar::{polar_chart, PolarChartHandle, PolarChartModel, PolarChartMode, PolarChartStyle};
     pub use crate::scatter::{
-        linked_scatter_chart, scatter_chart, ScatterChartHandle, ScatterChartModel,
-        ScatterChartStyle,
+        linked_scatter_chart, linked_scatter_chart_with_bindings, scatter_chart,
+        scatter_chart_with_bindings, ScatterChartHandle, ScatterChartModel, ScatterChartStyle,
     };
     pub use crate::stacked_area::{
-        linked_stacked_area_chart, stacked_area_chart, StackedAreaChartHandle,
-        StackedAreaChartModel, StackedAreaChartStyle, StackedAreaMode,
+        linked_stacked_area_chart, linked_stacked_area_chart_with_bindings, stacked_area_chart,
+        stacked_area_chart_with_bindings, StackedAreaChartHandle, StackedAreaChartModel,
+        StackedAreaChartStyle, StackedAreaMode,
     };
     pub use crate::statistics::{
-        statistics_chart, StatisticsChartHandle, StatisticsChartModel, StatisticsChartStyle,
+        statistics_chart, statistics_chart_with_bindings, StatisticsChartHandle,
+        StatisticsChartModel, StatisticsChartStyle,
     };
     pub use crate::time_series::TimeSeriesF32;
     pub use crate::view::{ChartView, Domain1D, Domain2D};
+    pub use crate::{ChartInputBindings, DragAction, DragBinding, ModifiersReq};
 }

@@ -1,8 +1,6 @@
 use std::sync::{Arc, Mutex};
 
 use blinc_core::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
-use blinc_layout::canvas::canvas;
-use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::brush::BrushX;
@@ -10,6 +8,7 @@ use crate::common::{draw_grid, fill_bg};
 use crate::link::ChartLinkHandle;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
+use crate::xy_stack::InteractiveXChartModel;
 
 fn series_color(i: usize) -> Color {
     let hues = [
@@ -64,6 +63,40 @@ impl Default for StackedAreaChartStyle {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CacheKey {
+    x_min: u32,
+    x_max: u32,
+    plot_x: u32,
+    plot_y: u32,
+    plot_w: u32,
+    plot_h: u32,
+    mode: u8,
+    series_n: u32,
+    total_y_max: u32,
+}
+
+impl CacheKey {
+    fn new(model: &StackedAreaChartModel, plot: (f32, f32, f32, f32), series_n: usize) -> Self {
+        let (px, py, pw, ph) = plot;
+        let mode = match model.style.mode {
+            StackedAreaMode::Stacked => 0,
+            StackedAreaMode::Streamgraph => 1,
+        };
+        Self {
+            x_min: model.view.domain.x.min.to_bits(),
+            x_max: model.view.domain.x.max.to_bits(),
+            plot_x: px.to_bits(),
+            plot_y: py.to_bits(),
+            plot_w: pw.to_bits(),
+            plot_h: ph.to_bits(),
+            mode,
+            series_n: series_n as u32,
+            total_y_max: model.total_y_max.to_bits(),
+        }
+    }
+}
+
 pub struct StackedAreaChartModel {
     pub series: Vec<TimeSeriesF32>,
     pub view: ChartView,
@@ -76,6 +109,15 @@ pub struct StackedAreaChartModel {
 
     last_drag_total_x: Option<f32>,
     brush_x: BrushX,
+
+    // Cached geometry (local px) for plot rendering.
+    cached_key: Option<CacheKey>,
+    cached_samples: Vec<usize>,
+    cached_bottoms: Vec<f32>, // [s*sample_n + k]
+    cached_tops: Vec<f32>,    // [s*sample_n + k]
+    cached_band_paths: Vec<blinc_core::Path>,
+    cached_top_pts: Vec<Vec<Point>>, // per-band polyline (px)
+    scratch_vals: Vec<f32>,
 }
 
 impl StackedAreaChartModel {
@@ -125,6 +167,13 @@ impl StackedAreaChartModel {
             total_y_max: y_max,
             last_drag_total_x: None,
             brush_x: BrushX::default(),
+            cached_key: None,
+            cached_samples: Vec::new(),
+            cached_bottoms: Vec::new(),
+            cached_tops: Vec::new(),
+            cached_band_paths: Vec::new(),
+            cached_top_pts: Vec::new(),
+            scratch_vals: Vec::new(),
         })
     }
 
@@ -246,87 +295,148 @@ impl StackedAreaChartModel {
             StackedAreaMode::Streamgraph => Domain1D::new(-y_max * 0.55, y_max * 0.55),
         };
 
-        let Some(first) = self.series.first() else { return };
+        self.ensure_cached_geometry(w, h);
+        if self.cached_band_paths.is_empty() {
+            return;
+        }
+
+        // Draw from bottom to top. Each band gets a deterministic color.
+        let outline = Stroke::new(self.style.stroke_width.max(0.8));
+        for (s, path) in self.cached_band_paths.iter().enumerate() {
+            let color = series_color(s);
+            let fill = Brush::Solid(Color::rgba(color.r, color.g, color.b, 0.35));
+            let Some(top_pts) = self.cached_top_pts.get(s) else {
+                continue;
+            };
+            if top_pts.len() < 2 {
+                continue;
+            }
+            ctx.fill_path(path, fill);
+            ctx.stroke_polyline(top_pts, &outline, Brush::Solid(color));
+        }
+    }
+
+    fn ensure_cached_geometry(&mut self, w: f32, h: f32) {
+        let plot = self.plot_rect(w, h);
+        let (px, py, pw, ph) = plot;
+        if pw <= 0.0 || ph <= 0.0 {
+            self.cached_key = None;
+            self.cached_samples.clear();
+            self.cached_bottoms.clear();
+            self.cached_tops.clear();
+            self.cached_band_paths.clear();
+            self.cached_top_pts.clear();
+            return;
+        }
+
+        let series_n = self.series.len().min(16);
+        let key = CacheKey::new(self, plot, series_n);
+        if self.cached_key == Some(key) {
+            return;
+        }
+
+        self.cached_samples.clear();
+        self.cached_band_paths.clear();
+
+        if self.cached_top_pts.len() < series_n {
+            self.cached_top_pts.resize_with(series_n, Vec::new);
+        } else {
+            self.cached_top_pts.truncate(series_n);
+        }
+        for top in &mut self.cached_top_pts {
+            top.clear();
+        }
+
+        let Some(first) = self.series.first() else {
+            self.cached_key = Some(key);
+            return;
+        };
 
         let i0 = first.lower_bound_x(self.view.domain.x.min);
         let i1 = first.upper_bound_x(self.view.domain.x.max);
         let i1 = i1.max(i0 + 1).min(first.len());
+        if i1 <= i0 + 1 {
+            self.cached_key = Some(key);
+            return;
+        }
 
         // Sample at ~1-2 points per pixel for smooth fills.
         let max_samples = (pw.ceil() as usize).clamp(64, 2_000);
         let step = ((i1 - i0) / max_samples.max(1)).max(1);
 
-        let series_n = self.series.len().min(16);
-        let mut xs = Vec::new();
-        xs.reserve(((i1 - i0) / step).max(2));
+        self.cached_samples.reserve(((i1 - i0) / step).max(2) + 1);
         for i in (i0..i1).step_by(step) {
-            xs.push(i);
+            self.cached_samples.push(i);
         }
-        if xs.len() < 2 {
+        let last = i1 - 1;
+        if self.cached_samples.last().copied() != Some(last) {
+            self.cached_samples.push(last);
+        }
+        if self.cached_samples.len() < 2 {
+            self.cached_key = Some(key);
             return;
         }
 
-        // Precompute stacked bottoms/tops in data coords for each sampled x.
-        // tops[s][k] = y_top, bottoms[s][k] = y_bottom (data space).
-        let sample_n = xs.len();
-        let mut bottoms: Vec<Vec<f32>> = vec![vec![0.0; sample_n]; series_n];
-        let mut tops: Vec<Vec<f32>> = vec![vec![0.0; sample_n]; series_n];
+        let sample_n = self.cached_samples.len();
+        let needed = series_n * sample_n;
+        self.cached_bottoms.resize(needed, 0.0);
+        self.cached_tops.resize(needed, 0.0);
 
-        for (k, &i) in xs.iter().enumerate() {
-            let mut vals = vec![0.0f32; series_n];
+        self.scratch_vals.clear();
+        self.scratch_vals.resize(series_n, 0.0);
+
+        for (k, &i) in self.cached_samples.iter().enumerate() {
             let mut sum = 0.0f32;
             for s in 0..series_n {
                 let v = self.series[s].y[i];
                 let v = if v.is_finite() { v.max(0.0) } else { 0.0 };
-                vals[s] = v;
+                self.scratch_vals[s] = v;
                 sum += v;
             }
+
             let baseline = match self.style.mode {
                 StackedAreaMode::Stacked => 0.0,
                 StackedAreaMode::Streamgraph => -0.5 * sum,
             };
             let mut cur = baseline;
             for s in 0..series_n {
-                bottoms[s][k] = cur;
-                cur += vals[s];
-                tops[s][k] = cur;
+                self.cached_bottoms[s * sample_n + k] = cur;
+                cur += self.scratch_vals[s];
+                self.cached_tops[s * sample_n + k] = cur;
             }
         }
 
-        // Draw from bottom to top. Each band gets a deterministic color.
-        let outline = Stroke::new(self.style.stroke_width.max(0.8));
+        self.cached_band_paths.reserve(series_n);
         for s in 0..series_n {
-            let color = series_color(s);
-            let fill = Brush::Solid(Color::rgba(color.r, color.g, color.b, 0.35));
+            let top_pts = &mut self.cached_top_pts[s];
+            top_pts.reserve(sample_n);
 
-            let mut top_pts = Vec::with_capacity(sample_n);
-            let mut bot_pts = Vec::with_capacity(sample_n);
-            for (k, &i) in xs.iter().enumerate() {
+            let mut path: Option<blinc_core::Path> = None;
+            for (k, &i) in self.cached_samples.iter().enumerate() {
                 let x = first.x[i];
-                top_pts.push(self.view.data_to_px(Point::new(x, tops[s][k]), px, py, pw, ph));
-                bot_pts.push(self.view.data_to_px(
-                    Point::new(x, bottoms[s][k]),
-                    px,
-                    py,
-                    pw,
-                    ph,
-                ));
-            }
-            if top_pts.len() < 2 {
-                continue;
+                let y = self.cached_tops[s * sample_n + k];
+                let p = self.view.data_to_px(Point::new(x, y), px, py, pw, ph);
+                top_pts.push(p);
+                path = Some(match path {
+                    None => blinc_core::Path::new().move_to(p.x, p.y),
+                    Some(prev) => prev.line_to(p.x, p.y),
+                });
             }
 
-            let mut path = blinc_core::Path::new().move_to(top_pts[0].x, top_pts[0].y);
-            for p in &top_pts[1..] {
-                path = path.line_to(p.x, p.y);
-            }
-            for p in bot_pts.iter().rev() {
+            let Some(mut path) = path else {
+                continue;
+            };
+            for (k, &i) in self.cached_samples.iter().enumerate().rev() {
+                let x = first.x[i];
+                let y = self.cached_bottoms[s * sample_n + k];
+                let p = self.view.data_to_px(Point::new(x, y), px, py, pw, ph);
                 path = path.line_to(p.x, p.y);
             }
             path = path.close();
-            ctx.fill_path(&path, fill);
-            ctx.stroke_polyline(&top_pts, &outline, Brush::Solid(color));
+            self.cached_band_paths.push(path);
         }
+
+        self.cached_key = Some(key);
     }
 
     pub fn render_overlay(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
@@ -362,6 +472,68 @@ impl StackedAreaChartModel {
     }
 }
 
+impl InteractiveXChartModel for StackedAreaChartModel {
+    fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
+        StackedAreaChartModel::on_mouse_move(self, local_x, local_y, w, h);
+    }
+
+    fn on_mouse_down(&mut self, brush_modifier: bool, local_x: f32, w: f32, h: f32) {
+        StackedAreaChartModel::on_mouse_down(self, brush_modifier, local_x, w, h);
+    }
+
+    fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
+        StackedAreaChartModel::on_scroll(self, delta_y, cursor_x_px, w, h);
+    }
+
+    fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
+        StackedAreaChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h);
+    }
+
+    fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+        StackedAreaChartModel::on_drag_pan_total(self, drag_total_dx, w, h);
+    }
+
+    fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+        StackedAreaChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h);
+    }
+
+    fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
+        StackedAreaChartModel::on_mouse_up_finish_brush_x(self, w, h)
+    }
+
+    fn on_drag_end(&mut self) {
+        StackedAreaChartModel::on_drag_end(self);
+    }
+
+    fn render_plot(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
+        StackedAreaChartModel::render_plot(self, ctx, w, h);
+    }
+
+    fn render_overlay(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
+        StackedAreaChartModel::render_overlay(self, ctx, w, h);
+    }
+
+    fn plot_rect(&self, w: f32, h: f32) -> (f32, f32, f32, f32) {
+        self.view.plot_rect(w, h)
+    }
+
+    fn view(&self) -> &ChartView {
+        &self.view
+    }
+
+    fn view_mut(&mut self) -> &mut ChartView {
+        &mut self.view
+    }
+
+    fn crosshair_x_mut(&mut self) -> &mut Option<f32> {
+        &mut self.crosshair_x
+    }
+
+    fn is_brushing(&self) -> bool {
+        self.brush_x.is_active()
+    }
+}
+
 #[derive(Clone)]
 pub struct StackedAreaChartHandle(pub Arc<Mutex<StackedAreaChartModel>>);
 
@@ -372,204 +544,27 @@ impl StackedAreaChartHandle {
 }
 
 pub fn stacked_area_chart(handle: StackedAreaChartHandle) -> impl ElementBuilder {
-    let model_plot = handle.0.clone();
-    let model_overlay = handle.0.clone();
+    stacked_area_chart_with_bindings(handle, crate::ChartInputBindings::default())
+}
 
-    let model_move = handle.0.clone();
-    let model_scroll = handle.0.clone();
-    let model_pinch = handle.0.clone();
-    let model_down = handle.0.clone();
-    let model_drag = handle.0.clone();
-    let model_up = handle.0.clone();
-    let model_drag_end = handle.0.clone();
-
-    stack()
-        .w_full()
-        .h_full()
-        .overflow_clip()
-        .cursor(blinc_layout::element::CursorStyle::Crosshair)
-        .on_mouse_move(move |e| {
-            if let Ok(mut m) = model_move.lock() {
-                m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_down(move |e| {
-            if let Ok(mut m) = model_down.lock() {
-                m.on_mouse_down(e.shift, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_scroll(move |e| {
-            if let Ok(mut m) = model_scroll.lock() {
-                m.on_scroll(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_pinch(move |e| {
-            if let Ok(mut m) = model_pinch.lock() {
-                m.on_pinch(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag(move |e| {
-            if let Ok(mut m) = model_drag.lock() {
-                if e.shift {
-                    m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                } else {
-                    m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                }
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_up(move |e| {
-            if let Ok(mut m) = model_up.lock() {
-                let _ = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height);
-                m.on_drag_end();
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag_end(move |_e| {
-            if let Ok(mut m) = model_drag_end.lock() {
-                m.on_drag_end();
-            }
-        })
-        .child(
-            canvas(move |ctx, bounds| {
-                if let Ok(mut m) = model_plot.lock() {
-                    m.render_plot(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full(),
-        )
-        .child(
-            canvas(move |ctx, bounds| {
-                if let Ok(mut m) = model_overlay.lock() {
-                    m.render_overlay(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full()
-            .foreground(),
-        )
+pub fn stacked_area_chart_with_bindings(
+    handle: StackedAreaChartHandle,
+    bindings: crate::ChartInputBindings,
+) -> impl ElementBuilder {
+    crate::xy_stack::x_chart(handle.0, bindings)
 }
 
 pub fn linked_stacked_area_chart(
     handle: StackedAreaChartHandle,
     link: ChartLinkHandle,
 ) -> impl ElementBuilder {
-    let model_plot = handle.0.clone();
-    let model_overlay = handle.0.clone();
+    linked_stacked_area_chart_with_bindings(handle, link, crate::ChartInputBindings::default())
+}
 
-    let model_move = handle.0.clone();
-    let model_scroll = handle.0.clone();
-    let model_pinch = handle.0.clone();
-    let model_down = handle.0.clone();
-    let model_drag = handle.0.clone();
-    let model_up = handle.0.clone();
-    let model_drag_end = handle.0.clone();
-
-    let link_move = link.clone();
-    let link_scroll = link.clone();
-    let link_pinch = link.clone();
-    let link_down = link.clone();
-    let link_drag = link.clone();
-    let link_up = link.clone();
-    let link_plot = link.clone();
-    let link_overlay = link.clone();
-
-    stack()
-        .w_full()
-        .h_full()
-        .overflow_clip()
-        .cursor(blinc_layout::element::CursorStyle::Crosshair)
-        .on_mouse_move(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_move.lock(), model_move.lock()) {
-                m.view.domain.x = l.x_domain;
-                m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
-                if let Some(x) = m.hover_x {
-                    l.set_hover_x(Some(x));
-                } else {
-                    l.set_hover_x(None);
-                }
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_down(move |e| {
-            if let (Ok(_l), Ok(mut m)) = (link_down.lock(), model_down.lock()) {
-                m.on_mouse_down(e.shift, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_scroll(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_scroll.lock(), model_scroll.lock()) {
-                m.view.domain.x = l.x_domain;
-                m.on_scroll(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
-                l.set_x_domain(m.view.domain.x);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_pinch(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_pinch.lock(), model_pinch.lock()) {
-                m.view.domain.x = l.x_domain;
-                m.on_pinch(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
-                l.set_x_domain(m.view.domain.x);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_drag.lock(), model_drag.lock()) {
-                m.view.domain.x = l.x_domain;
-                if e.shift {
-                    m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                } else {
-                    m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                    l.set_x_domain(m.view.domain.x);
-                }
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_up(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_up.lock(), model_up.lock()) {
-                if let Some((a, b)) = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height)
-                {
-                    l.set_selection_x(Some((a, b)));
-                }
-                m.on_drag_end();
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag_end(move |_e| {
-            if let Ok(mut m) = model_drag_end.lock() {
-                m.on_drag_end();
-            }
-        })
-        .child(
-            canvas(move |ctx, bounds| {
-                if let (Ok(l), Ok(mut m)) = (link_plot.lock(), model_plot.lock()) {
-                    m.view.domain.x = l.x_domain;
-                    m.render_plot(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full(),
-        )
-        .child(
-            canvas(move |ctx, bounds| {
-                if let (Ok(l), Ok(mut m)) = (link_overlay.lock(), model_overlay.lock()) {
-                    m.view.domain.x = l.x_domain;
-                    if let Some(hx) = l.hover_x {
-                        let (px, _py, pw, _ph) = m.plot_rect(bounds.width, bounds.height);
-                        if pw > 0.0 {
-                            m.crosshair_x = Some(m.view.x_to_px(hx, px, pw));
-                        }
-                    }
-                    m.render_overlay(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full()
-            .foreground(),
-        )
+pub fn linked_stacked_area_chart_with_bindings(
+    handle: StackedAreaChartHandle,
+    link: ChartLinkHandle,
+    bindings: crate::ChartInputBindings,
+) -> impl ElementBuilder {
+    crate::xy_stack::linked_x_chart(handle.0, link, bindings)
 }

@@ -1,13 +1,12 @@
 use std::sync::{Arc, Mutex};
 
 use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
-use blinc_layout::canvas::canvas;
-use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::brush::BrushX;
 use crate::common::{draw_grid, fill_bg};
 use crate::view::{ChartView, Domain1D, Domain2D};
+use crate::xy_stack::InteractiveXChartModel;
 
 #[derive(Clone, Debug)]
 pub struct HistogramChartStyle {
@@ -17,6 +16,9 @@ pub struct HistogramChartStyle {
     pub crosshair: Color,
     pub text: Color,
     pub bins: usize,
+
+    pub scroll_zoom_factor: f32,
+    pub pinch_zoom_min: f32,
 }
 
 impl Default for HistogramChartStyle {
@@ -28,6 +30,8 @@ impl Default for HistogramChartStyle {
             crosshair: Color::rgba(1.0, 1.0, 1.0, 0.35),
             text: Color::rgba(1.0, 1.0, 1.0, 0.85),
             bins: 256,
+            scroll_zoom_factor: 0.02,
+            pinch_zoom_min: 0.01,
         }
     }
 }
@@ -131,6 +135,33 @@ impl HistogramChartModel {
         self.hover_x = Some(self.view.px_to_x(local_x, px, pw));
     }
 
+    pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
+        let (px, _py, pw, _ph) = self.plot_rect(w, h);
+        if pw <= 0.0 {
+            return;
+        }
+        let cursor_x_px = cursor_x_px.clamp(px, px + pw);
+        let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
+
+        let delta_y = delta_y.clamp(-250.0, 250.0);
+        let zoom = (-delta_y * self.style.scroll_zoom_factor).exp();
+        self.view.domain.x.zoom_about(pivot_x, zoom);
+        self.view.domain.x.clamp_span_min(1e-6);
+    }
+
+    pub fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
+        let (px, _py, pw, _ph) = self.plot_rect(w, h);
+        if pw <= 0.0 {
+            return;
+        }
+        let cursor_x_px = cursor_x_px.clamp(px, px + pw);
+        let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
+
+        let zoom = scale_delta.max(self.style.pinch_zoom_min);
+        self.view.domain.x.zoom_about(pivot_x, zoom);
+        self.view.domain.x.clamp_span_min(1e-6);
+    }
+
     pub fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
         let (_px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
@@ -197,14 +228,37 @@ impl HistogramChartModel {
         }
         draw_grid(ctx, px, py, pw, ph, self.style.grid, 4);
 
-        // Histogram is currently global (no pan/zoom recompute). Keep it simple for the demo.
         if self.hist.is_empty() {
             return;
         }
 
-        let bar_w = (pw / self.hist.len() as f32).max(1.0);
-        for (i, &c) in self.hist.iter().enumerate() {
-            let x = px + i as f32 * (pw / self.hist.len() as f32);
+        // Render only visible bins (pan/zoom uses X-domain mapping).
+        let bins = self.hist.len();
+        let data_span = (self.x_max - self.x_min).max(1e-12);
+        let bin_dx = data_span / bins as f32;
+        if !bin_dx.is_finite() || bin_dx <= 0.0 {
+            return;
+        }
+
+        let x0_vis = self.view.domain.x.min;
+        let x1_vis = self.view.domain.x.max;
+        let mut i0 = ((x0_vis - self.x_min) / bin_dx).floor() as isize;
+        let mut i1 = ((x1_vis - self.x_min) / bin_dx).ceil() as isize;
+        i0 = i0.clamp(0, bins as isize);
+        i1 = i1.clamp(0, bins as isize);
+        if i1 <= i0 {
+            return;
+        }
+
+        for i in i0..i1 {
+            let i = i as usize;
+            let c = self.hist[i];
+            let bin_x0 = self.x_min + i as f32 * bin_dx;
+            let bin_x1 = bin_x0 + bin_dx;
+            let x0_px = self.view.x_to_px(bin_x0, px, pw);
+            let x1_px = self.view.x_to_px(bin_x1, px, pw);
+            let x = x0_px.min(x1_px);
+            let bar_w = (x1_px - x0_px).abs().max(1.0);
             let y = c as f32;
             let y_px = self.view.y_to_px(y, py, ph);
             let top = y_px.min(py + ph);
@@ -251,6 +305,68 @@ impl HistogramChartModel {
     }
 }
 
+impl InteractiveXChartModel for HistogramChartModel {
+    fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
+        HistogramChartModel::on_mouse_move(self, local_x, local_y, w, h);
+    }
+
+    fn on_mouse_down(&mut self, brush_modifier: bool, local_x: f32, w: f32, h: f32) {
+        HistogramChartModel::on_mouse_down(self, brush_modifier, local_x, w, h);
+    }
+
+    fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
+        HistogramChartModel::on_scroll(self, delta_y, cursor_x_px, w, h);
+    }
+
+    fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
+        HistogramChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h);
+    }
+
+    fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+        HistogramChartModel::on_drag_pan_total(self, drag_total_dx, w, h);
+    }
+
+    fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+        HistogramChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h);
+    }
+
+    fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
+        HistogramChartModel::on_mouse_up_finish_brush_x(self, w, h)
+    }
+
+    fn on_drag_end(&mut self) {
+        HistogramChartModel::on_drag_end(self);
+    }
+
+    fn render_plot(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
+        HistogramChartModel::render_plot(self, ctx, w, h);
+    }
+
+    fn render_overlay(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
+        HistogramChartModel::render_overlay(self, ctx, w, h);
+    }
+
+    fn plot_rect(&self, w: f32, h: f32) -> (f32, f32, f32, f32) {
+        self.view.plot_rect(w, h)
+    }
+
+    fn view(&self) -> &ChartView {
+        &self.view
+    }
+
+    fn view_mut(&mut self) -> &mut ChartView {
+        &mut self.view
+    }
+
+    fn crosshair_x_mut(&mut self) -> &mut Option<f32> {
+        &mut self.crosshair_x
+    }
+
+    fn is_brushing(&self) -> bool {
+        self.brush_x.is_active()
+    }
+}
+
 #[derive(Clone)]
 pub struct HistogramChartHandle(pub Arc<Mutex<HistogramChartModel>>);
 
@@ -261,71 +377,12 @@ impl HistogramChartHandle {
 }
 
 pub fn histogram_chart(handle: HistogramChartHandle) -> impl ElementBuilder {
-    let model_plot = handle.0.clone();
-    let model_overlay = handle.0.clone();
+    histogram_chart_with_bindings(handle, crate::ChartInputBindings::default())
+}
 
-    let model_move = handle.0.clone();
-    let model_down = handle.0.clone();
-    let model_drag = handle.0.clone();
-    let model_up = handle.0.clone();
-    let model_drag_end = handle.0.clone();
-
-    stack()
-        .w_full()
-        .h_full()
-        .overflow_clip()
-        .cursor(blinc_layout::element::CursorStyle::Crosshair)
-        .on_mouse_move(move |e| {
-            if let Ok(mut m) = model_move.lock() {
-                m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_down(move |e| {
-            if let Ok(mut m) = model_down.lock() {
-                m.on_mouse_down(e.shift, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag(move |e| {
-            if let Ok(mut m) = model_drag.lock() {
-                if e.shift {
-                    m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                } else {
-                    m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                }
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_up(move |e| {
-            if let Ok(mut m) = model_up.lock() {
-                let _ = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height);
-                m.on_drag_end();
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag_end(move |_e| {
-            if let Ok(mut m) = model_drag_end.lock() {
-                m.on_drag_end();
-            }
-        })
-        .child(
-            canvas(move |ctx, bounds| {
-                if let Ok(mut m) = model_plot.lock() {
-                    m.render_plot(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full(),
-        )
-        .child(
-            canvas(move |ctx, bounds| {
-                if let Ok(mut m) = model_overlay.lock() {
-                    m.render_overlay(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full()
-            .foreground(),
-        )
+pub fn histogram_chart_with_bindings(
+    handle: HistogramChartHandle,
+    bindings: crate::ChartInputBindings,
+) -> impl ElementBuilder {
+    crate::xy_stack::x_chart(handle.0, bindings)
 }
