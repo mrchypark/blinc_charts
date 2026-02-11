@@ -210,12 +210,7 @@ impl HierarchyChartModel {
         if n.children.is_empty() {
             0
         } else {
-            1 + n
-                .children
-                .iter()
-                .map(Self::max_depth)
-                .max()
-                .unwrap_or(0)
+            1 + n.children.iter().map(Self::max_depth).max().unwrap_or(0)
         }
     }
 
