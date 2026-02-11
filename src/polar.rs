@@ -7,17 +7,12 @@ use blinc_layout::ElementBuilder;
 
 use crate::common::{draw_grid, fill_bg};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PolarChartMode {
+    #[default]
     Radar,
     Polar,
     Parallel,
-}
-
-impl Default for PolarChartMode {
-    fn default() -> Self {
-        Self::Radar
-    }
 }
 
 #[derive(Clone, Debug)]

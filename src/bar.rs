@@ -111,7 +111,7 @@ impl BarChartModel {
         } else {
             1.0
         };
-        if !(y_max > y_min) {
+        if y_max.partial_cmp(&y_min) != Some(std::cmp::Ordering::Greater) {
             y_max = y_min + 1.0;
         }
 

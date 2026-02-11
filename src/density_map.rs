@@ -104,11 +104,17 @@ impl DensityMapChartModel {
                 y_max = y_max.max(p.y);
             }
         }
-        if !x_min.is_finite() || !x_max.is_finite() || !(x_max > x_min) {
+        if !x_min.is_finite()
+            || !x_max.is_finite()
+            || x_max.partial_cmp(&x_min) != Some(std::cmp::Ordering::Greater)
+        {
             x_min = 0.0;
             x_max = 1.0;
         }
-        if !y_min.is_finite() || !y_max.is_finite() || !(y_max > y_min) {
+        if !y_min.is_finite()
+            || !y_max.is_finite()
+            || y_max.partial_cmp(&y_min) != Some(std::cmp::Ordering::Greater)
+        {
             y_min = 0.0;
             y_max = 1.0;
         }

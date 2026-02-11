@@ -88,7 +88,7 @@ impl LineChartModel {
     pub fn new(series: TimeSeriesF32) -> Self {
         let (x0, x1) = series.x_min_max();
         let (mut y0, mut y1) = series.y_min_max();
-        if !(y1 > y0) {
+        if y1.partial_cmp(&y0) != Some(std::cmp::Ordering::Greater) {
             // Handle degenerate or invalid y-ranges (e.g. all NaN -> (0,0)).
             if y0.is_finite() && y1.is_finite() {
                 y0 -= 1.0;

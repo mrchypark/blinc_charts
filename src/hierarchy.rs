@@ -7,18 +7,13 @@ use blinc_layout::ElementBuilder;
 
 use crate::common::{draw_grid, fill_bg};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HierarchyMode {
+    #[default]
     Treemap,
     Icicle,
     Sunburst,
     Packing,
-}
-
-impl Default for HierarchyMode {
-    fn default() -> Self {
-        Self::Treemap
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -186,16 +181,14 @@ impl HierarchyChartModel {
                 self.layout_treemap(&root, Rect::new(px, py, pw, ph), 0, true);
             }
             HierarchyMode::Icicle => {
-                let max_depth = self.max_depth(&root);
+                let max_depth = Self::max_depth(&root);
                 let level_h = (ph / (max_depth.max(1) as f32 + 1.0)).max(1.0);
                 self.layout_icicle(&root, Rect::new(px, py, pw, level_h), 0, max_depth);
             }
             HierarchyMode::Sunburst => {
-                let max_depth = self.max_depth(&root);
+                let max_depth = Self::max_depth(&root);
                 let r = (pw.min(ph) * 0.48).max(10.0);
-                let cx = px + pw * 0.5;
-                let cy = py + ph * 0.5;
-                self.layout_sunburst(&root, 0.0, std::f32::consts::TAU, 0, max_depth, cx, cy, r);
+                self.layout_sunburst(&root, 0.0, std::f32::consts::TAU, 0, max_depth, r);
             }
             HierarchyMode::Packing => {
                 let cx = px + pw * 0.5;
@@ -213,14 +206,14 @@ impl HierarchyChartModel {
         self.last_layout_key = Some(key);
     }
 
-    fn max_depth(&self, n: &HierarchyNode) -> usize {
+    fn max_depth(n: &HierarchyNode) -> usize {
         if n.children.is_empty() {
             0
         } else {
             1 + n
                 .children
                 .iter()
-                .map(|c| self.max_depth(c))
+                .map(Self::max_depth)
                 .max()
                 .unwrap_or(0)
         }
@@ -237,7 +230,7 @@ impl HierarchyChartModel {
             return;
         }
         let total: f32 = n.children.iter().map(|c| c.weight().max(0.0)).sum();
-        if !(total > 0.0) {
+        if total.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return;
         }
 
@@ -278,7 +271,7 @@ impl HierarchyChartModel {
         let level_h = rect.height().max(1.0);
         let next_y = rect.y() + level_h;
         let total: f32 = n.children.iter().map(|c| c.weight().max(0.0)).sum();
-        if !(total > 0.0) {
+        if total.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return;
         }
 
@@ -306,8 +299,6 @@ impl HierarchyChartModel {
         a1: f32,
         depth: usize,
         max_depth: usize,
-        cx: f32,
-        cy: f32,
         r: f32,
     ) {
         if n.children.is_empty() || depth >= max_depth {
@@ -325,7 +316,7 @@ impl HierarchyChartModel {
         }
 
         let total: f32 = n.children.iter().map(|c| c.weight().max(0.0)).sum();
-        if !(total > 0.0) {
+        if total.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return;
         }
         let mut cur = a0;
@@ -336,7 +327,7 @@ impl HierarchyChartModel {
             }
             let span = (a1 - a0) * (w / total);
             let next = cur + span;
-            self.layout_sunburst(c, cur, next, depth + 1, max_depth, cx, cy, r);
+            self.layout_sunburst(c, cur, next, depth + 1, max_depth, r);
             cur = next;
         }
     }
@@ -344,14 +335,14 @@ impl HierarchyChartModel {
     fn layout_packing(&mut self, n: &HierarchyNode, cx: f32, cy: f32, r: f32) {
         // Naive packing: place leaf circles along a spiral, with radius ~ sqrt(weight).
         let mut leaves = Vec::new();
-        self.collect_leaves(n, 0, &mut leaves);
+        Self::collect_leaves(n, 0, &mut leaves);
         if leaves.is_empty() {
             return;
         }
         leaves.sort_by(|a, b| b.2.total_cmp(&a.2));
 
         let total: f32 = leaves.iter().map(|l| l.2.max(0.0)).sum();
-        if !(total > 0.0) {
+        if total.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return;
         }
 
@@ -403,13 +394,13 @@ impl HierarchyChartModel {
         }
     }
 
-    fn collect_leaves(&self, n: &HierarchyNode, depth: usize, out: &mut Vec<(String, usize, f32)>) {
+    fn collect_leaves(n: &HierarchyNode, depth: usize, out: &mut Vec<(String, usize, f32)>) {
         if n.children.is_empty() {
             out.push((n.label.clone(), depth, n.value.max(0.0)));
             return;
         }
         for c in &n.children {
-            self.collect_leaves(c, depth + 1, out);
+            Self::collect_leaves(c, depth + 1, out);
         }
     }
 
@@ -494,7 +485,7 @@ impl HierarchyChartModel {
 
         match self.style.mode {
             HierarchyMode::Sunburst => {
-                let max_depth = self.max_depth(&self.root).max(1);
+                let max_depth = Self::max_depth(&self.root).max(1);
                 let r = (pw.min(ph) * 0.48).max(10.0);
                 let cx = px + pw * 0.5;
                 let cy = py + ph * 0.5;
@@ -508,7 +499,9 @@ impl HierarchyChartModel {
                     let r1 = leaf.rect.height();
                     let r0 = r0.min(r);
                     let r1 = r1.min(r);
-                    if !(a1 > a0) || !(r1 > r0) {
+                    if a1.partial_cmp(&a0) != Some(std::cmp::Ordering::Greater)
+                        || r1.partial_cmp(&r0) != Some(std::cmp::Ordering::Greater)
+                    {
                         continue;
                     }
 

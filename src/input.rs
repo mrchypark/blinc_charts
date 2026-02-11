@@ -1,7 +1,7 @@
-/// Interaction bindings for charts.
-///
-/// `blinc_charts` is a library crate, so gesture/key bindings must be configurable.
-/// We keep bindings simple and purely data-driven so they can be shared across chart types.
+//! Interaction bindings for charts.
+//!
+//! `blinc_charts` is a library crate, so gesture/key bindings must be configurable.
+//! We keep bindings simple and purely data-driven so they can be shared across chart types.
 
 /// A "required modifiers" mask.
 ///

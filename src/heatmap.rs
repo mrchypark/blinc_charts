@@ -77,7 +77,10 @@ impl HeatmapChartModel {
                 vmax = vmax.max(v);
             }
         }
-        if !vmin.is_finite() || !vmax.is_finite() || !(vmax > vmin) {
+        if !vmin.is_finite()
+            || !vmax.is_finite()
+            || vmax.partial_cmp(&vmin) != Some(std::cmp::Ordering::Greater)
+        {
             (0.0, 1.0)
         } else {
             (vmin, vmax)
@@ -133,11 +136,11 @@ impl HeatmapChartModel {
         cells_y = cells_y.max(1);
         // Choose steps so the sampled grid does not exceed max_cells_{x,y}.
         // Use integer ceil-div to avoid oversampling due to float truncation.
-        let step_x = ((self.grid_w + cells_x - 1) / cells_x).max(1);
-        let step_y = ((self.grid_h + cells_y - 1) / cells_y).max(1);
+        let step_x = self.grid_w.div_ceil(cells_x).max(1);
+        let step_y = self.grid_h.div_ceil(cells_y).max(1);
 
-        let sampled_w = ((self.grid_w + step_x - 1) / step_x).max(1) as f32;
-        let sampled_h = ((self.grid_h + step_y - 1) / step_y).max(1) as f32;
+        let sampled_w = self.grid_w.div_ceil(step_x).max(1) as f32;
+        let sampled_h = self.grid_h.div_ceil(step_y).max(1) as f32;
 
         let cell_w = (pw / sampled_w).max(1.0);
         let cell_h = (ph / sampled_h).max(1.0);

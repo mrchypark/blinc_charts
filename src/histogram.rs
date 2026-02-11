@@ -68,7 +68,10 @@ impl HistogramChartModel {
                 x_max = x_max.max(v);
             }
         }
-        if !x_min.is_finite() || !x_max.is_finite() || !(x_max > x_min) {
+        if !x_min.is_finite()
+            || !x_max.is_finite()
+            || x_max.partial_cmp(&x_min) != Some(std::cmp::Ordering::Greater)
+        {
             x_min = 0.0;
             x_max = 1.0;
         }

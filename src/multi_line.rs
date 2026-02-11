@@ -147,7 +147,7 @@ impl MultiLineChartModel {
         }
 
         // Avoid degenerate y ranges.
-        if !(y_max > y_min) {
+        if y_max.partial_cmp(&y_min) != Some(std::cmp::Ordering::Greater) {
             // Handle degenerate or invalid y-ranges.
             if y_min.is_finite() && y_max.is_finite() {
                 y_min -= 1.0;
@@ -289,7 +289,7 @@ impl MultiLineChartModel {
 
     fn palette_color(i: usize, alpha: f32) -> Color {
         // Golden-ratio hue step for decent distribution.
-        let h = (i as f32 * 0.618_033_988_75) % 1.0;
+        let h = (i as f32 * 0.618_034) % 1.0;
         let s = 0.75;
         let v = 0.95;
         let (r, g, b) = hsv_to_rgb(h, s, v);

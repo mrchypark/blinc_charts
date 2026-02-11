@@ -58,7 +58,7 @@ pub fn downsample_min_max(
     // Bucket size in indices.
     let buckets = target / 2; // each bucket emits up to 2 points (min/max)
     let buckets = buckets.max(1);
-    let bucket_size = (visible + buckets - 1) / buckets;
+    let bucket_size = visible.div_ceil(buckets);
 
     out.reserve(target + 4);
 

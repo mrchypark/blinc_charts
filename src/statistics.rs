@@ -82,7 +82,10 @@ impl StatisticsChartModel {
                 }
             }
         }
-        if !y_min.is_finite() || !y_max.is_finite() || !(y_max > y_min) {
+        if !y_min.is_finite()
+            || !y_max.is_finite()
+            || y_max.partial_cmp(&y_min) != Some(std::cmp::Ordering::Greater)
+        {
             y_min = 0.0;
             y_max = 1.0;
         }

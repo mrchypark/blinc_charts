@@ -23,16 +23,11 @@ fn series_color(i: usize) -> Color {
     Color::rgba(r, g, b, 0.85)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StackedAreaMode {
+    #[default]
     Stacked,
     Streamgraph,
-}
-
-impl Default for StackedAreaMode {
-    fn default() -> Self {
-        Self::Stacked
-    }
 }
 
 #[derive(Clone, Debug)]

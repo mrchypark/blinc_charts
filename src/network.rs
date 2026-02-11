@@ -8,17 +8,12 @@ use blinc_layout::ElementBuilder;
 use crate::common::{draw_grid, fill_bg};
 use crate::view::{ChartView, Domain1D, Domain2D};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum NetworkMode {
+    #[default]
     Graph,
     Sankey,
     Chord,
-}
-
-impl Default for NetworkMode {
-    fn default() -> Self {
-        Self::Graph
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -85,7 +80,7 @@ impl NetworkChartModel {
         );
 
         let links: Vec<(usize, usize, f32)> = edges.into_iter().map(|(a, b)| (a, b, 1.0)).collect();
-        Ok(Self::new(NetworkMode::Graph, nodes, links, Vec::new())?)
+        Self::new(NetworkMode::Graph, nodes, links, Vec::new())
     }
 
     pub fn new_sankey(nodes: Vec<String>, links: Vec<(usize, usize, f32)>) -> anyhow::Result<Self> {
@@ -97,7 +92,7 @@ impl NetworkChartModel {
             !links.is_empty(),
             "NetworkChartModel(sankey) requires non-empty links"
         );
-        Ok(Self::new(NetworkMode::Sankey, nodes, links, Vec::new())?)
+        Self::new(NetworkMode::Sankey, nodes, links, Vec::new())
     }
 
     pub fn new_chord(labels: Vec<String>, matrix: Vec<Vec<f32>>) -> anyhow::Result<Self> {
@@ -115,9 +110,8 @@ impl NetworkChartModel {
         );
 
         let mut links = Vec::new();
-        for i in 0..labels.len() {
-            for j in 0..labels.len() {
-                let w = matrix[i][j];
+        for (i, row) in matrix.iter().enumerate().take(labels.len()) {
+            for (j, &w) in row.iter().enumerate().take(labels.len()) {
                 if w.is_finite() && w > 0.0 {
                     links.push((i, j, w));
                 }

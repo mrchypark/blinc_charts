@@ -45,12 +45,9 @@ impl ChartLink {
     }
 
     pub fn set_selection_x(&mut self, selection_x: Option<(f32, f32)>) {
-        self.selection_x = selection_x.and_then(|(a, b)| {
-            if !(a.is_finite() && b.is_finite()) {
-                return None;
-            }
-            Some(if a <= b { (a, b) } else { (b, a) })
-        });
+        self.selection_x = selection_x
+            .filter(|(a, b)| a.is_finite() && b.is_finite())
+            .map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
     }
 }
 
