@@ -376,21 +376,20 @@ impl NetworkChartModel {
             if a >= n || b >= n {
                 continue;
             }
-            let (Some(da), Some(db)) = (self.layout.node_pos.get(a), self.layout.node_pos.get(b))
-            else {
-                continue;
-            };
-            let pa = self.view.data_to_px(*da, px, py, pw, ph);
-            let pb = self.view.data_to_px(*db, px, py, pw, ph);
+            let pa = self
+                .view
+                .data_to_px(self.layout.node_pos[a], px, py, pw, ph);
+            let pb = self
+                .view
+                .data_to_px(self.layout.node_pos[b], px, py, pw, ph);
             ctx.stroke_polyline(&[pa, pb], &link_stroke, Brush::Solid(self.style.link));
         }
 
         let node_stroke = Stroke::new(1.0);
         for i in 0..n {
-            let Some(dp) = self.layout.node_pos.get(i) else {
-                continue;
-            };
-            let p = self.view.data_to_px(*dp, px, py, pw, ph);
+            let p = self
+                .view
+                .data_to_px(self.layout.node_pos[i], px, py, pw, ph);
             let r = self.style.node_radius.max(2.0);
             ctx.fill_circle(p, r, Brush::Solid(self.style.node));
             ctx.stroke_circle(
