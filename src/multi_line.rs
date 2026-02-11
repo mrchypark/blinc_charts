@@ -1,8 +1,6 @@
 use std::sync::{Arc, Mutex};
 
 use blinc_core::{Brush, Color, CornerRadius, DrawContext, Point, Rect, Stroke, TextStyle};
-use blinc_layout::canvas::canvas;
-use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::brush::BrushX;
@@ -11,6 +9,46 @@ use crate::lod::{downsample_min_max, DownsampleParams};
 use crate::segments::runs_by_gap;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
+use crate::xy_stack::InteractiveXChartModel;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CacheKey {
+    x_min: u32,
+    x_max: u32,
+    plot_x: u32,
+    plot_y: u32,
+    plot_w: u32,
+    plot_h: u32,
+    max_series: u32,
+    max_total_segments: u32,
+    max_points_per_series: u32,
+    gap_dx: u32,
+}
+
+impl CacheKey {
+    fn new(model: &MultiLineChartModel, plot: (f32, f32, f32, f32)) -> Self {
+        let (px, py, pw, ph) = plot;
+        Self {
+            x_min: model.view.domain.x.min.to_bits(),
+            x_max: model.view.domain.x.max.to_bits(),
+            plot_x: px.to_bits(),
+            plot_y: py.to_bits(),
+            plot_w: pw.to_bits(),
+            plot_h: ph.to_bits(),
+            max_series: model.style.max_series as u32,
+            max_total_segments: model.style.max_total_segments as u32,
+            max_points_per_series: model.style.max_points_per_series as u32,
+            gap_dx: model.gap_dx.to_bits(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CachedRun {
+    start: usize,
+    end: usize,
+    series_index: usize,
+}
 
 /// Visual styling for a multi-line chart.
 #[derive(Clone, Debug)]
@@ -81,6 +119,11 @@ pub struct MultiLineChartModel {
     downsample_params: DownsampleParams,
 
     brush_x: BrushX,
+
+    // Cached (downsampled + transformed) geometry in local px coords.
+    cached_key: Option<CacheKey>,
+    cached_points_px: Vec<Point>,
+    cached_runs: Vec<CachedRun>,
 }
 
 impl MultiLineChartModel {
@@ -129,6 +172,9 @@ impl MultiLineChartModel {
             scratch_runs: Vec::new(),
             downsample_params: DownsampleParams::default(),
             brush_x: BrushX::default(),
+            cached_key: None,
+            cached_points_px: Vec::new(),
+            cached_runs: Vec::new(),
         })
     }
 
@@ -262,30 +308,51 @@ impl MultiLineChartModel {
             return;
         }
 
-        // Grid (cheap, fixed count)
-        let grid_n = 4;
-        for i in 0..=grid_n {
-            let t = i as f32 / grid_n as f32;
-            let x = px + t * pw;
-            let y = py + t * ph;
-            ctx.fill_rect(
-                Rect::new(x, py, 1.0, ph),
-                0.0.into(),
-                Brush::Solid(self.style.grid),
-            );
-            ctx.fill_rect(
-                Rect::new(px, y, pw, 1.0),
-                0.0.into(),
-                Brush::Solid(self.style.grid),
-            );
-        }
+        crate::common::draw_grid(ctx, px, py, pw, ph, self.style.grid, 4);
 
-        let n = self.series.len().min(self.style.max_series);
-        if n == 0 {
+        self.ensure_cached_geometry(w, h);
+        if self.cached_runs.is_empty() {
             return;
         }
 
         let stroke = Stroke::new(self.style.stroke_width);
+        for run in self.cached_runs.iter().copied() {
+            if run.end <= run.start + 1 || run.end > self.cached_points_px.len() {
+                continue;
+            }
+            let color = Self::palette_color(run.series_index, self.style.series_alpha);
+            ctx.stroke_polyline(
+                &self.cached_points_px[run.start..run.end],
+                &stroke,
+                Brush::Solid(color),
+            );
+        }
+    }
+
+    fn ensure_cached_geometry(&mut self, w: f32, h: f32) {
+        let plot = self.plot_rect(w, h);
+        let (px, py, pw, ph) = plot;
+        if pw <= 0.0 || ph <= 0.0 {
+            self.cached_key = None;
+            self.cached_points_px.clear();
+            self.cached_runs.clear();
+            return;
+        }
+
+        let key = CacheKey::new(self, plot);
+        if self.cached_key == Some(key) {
+            return;
+        }
+
+        self.cached_points_px.clear();
+        self.cached_runs.clear();
+
+        let n = self.series.len().min(self.style.max_series);
+        if n == 0 {
+            self.cached_key = Some(key);
+            return;
+        }
+
         let mut remaining_segments = self.style.max_total_segments.max(1);
 
         // Per-series point cap: also bounded by pixels so we don't waste work.
@@ -326,28 +393,44 @@ impl MultiLineChartModel {
             // Split runs on missing data gaps.
             runs_by_gap(&self.scratch_data, self.gap_dx, &mut self.scratch_runs);
 
-            let color = Self::palette_color(si, self.style.series_alpha);
             for (a, b) in self.scratch_runs.iter().copied() {
+                if remaining_segments == 0 {
+                    break;
+                }
+
                 let len = b.saturating_sub(a);
-                if len < 2 || remaining_segments == 0 {
+                if len < 2 {
                     continue;
                 }
 
-                // Clip to segment budget.
                 let need = len - 1;
+                let end = if need > remaining_segments {
+                    a + remaining_segments + 1
+                } else {
+                    b
+                };
+
+                if end > a + 1 && end <= b {
+                    let start_idx = self.cached_points_px.len();
+                    self.cached_points_px.extend_from_slice(&self.scratch_px[a..end]);
+                    let end_idx = self.cached_points_px.len();
+                    self.cached_runs.push(CachedRun {
+                        start: start_idx,
+                        end: end_idx,
+                        series_index: si,
+                    });
+                }
+
                 if need > remaining_segments {
-                    let end = a + remaining_segments + 1;
-                    if end > a + 1 && end <= b {
-                        ctx.stroke_polyline(&self.scratch_px[a..end], &stroke, Brush::Solid(color));
-                        remaining_segments = 0;
-                    }
+                    remaining_segments = 0;
                     break;
                 } else {
-                    ctx.stroke_polyline(&self.scratch_px[a..b], &stroke, Brush::Solid(color));
                     remaining_segments = remaining_segments.saturating_sub(need);
                 }
             }
         }
+
+        self.cached_key = Some(key);
     }
 
     pub fn render_overlay(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
@@ -379,6 +462,68 @@ impl MultiLineChartModel {
             let style = TextStyle::new(12.0).with_color(self.style.text);
             ctx.draw_text(&text, Point::new(px + 6.0, py + 6.0), &style);
         }
+    }
+}
+
+impl InteractiveXChartModel for MultiLineChartModel {
+    fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
+        MultiLineChartModel::on_mouse_move(self, local_x, local_y, w, h);
+    }
+
+    fn on_mouse_down(&mut self, brush_modifier: bool, local_x: f32, w: f32, h: f32) {
+        MultiLineChartModel::on_mouse_down(self, brush_modifier, local_x, w, h);
+    }
+
+    fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
+        MultiLineChartModel::on_scroll(self, delta_y, cursor_x_px, w, h);
+    }
+
+    fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
+        MultiLineChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h);
+    }
+
+    fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+        MultiLineChartModel::on_drag_pan_total(self, drag_total_dx, w, h);
+    }
+
+    fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+        MultiLineChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h);
+    }
+
+    fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
+        MultiLineChartModel::on_mouse_up_finish_brush_x(self, w, h)
+    }
+
+    fn on_drag_end(&mut self) {
+        MultiLineChartModel::on_drag_end(self);
+    }
+
+    fn render_plot(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
+        MultiLineChartModel::render_plot(self, ctx, w, h);
+    }
+
+    fn render_overlay(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
+        MultiLineChartModel::render_overlay(self, ctx, w, h);
+    }
+
+    fn plot_rect(&self, w: f32, h: f32) -> (f32, f32, f32, f32) {
+        self.view.plot_rect(w, h)
+    }
+
+    fn view(&self) -> &ChartView {
+        &self.view
+    }
+
+    fn view_mut(&mut self) -> &mut ChartView {
+        &mut self.view
+    }
+
+    fn crosshair_x_mut(&mut self) -> &mut Option<f32> {
+        &mut self.crosshair_x
+    }
+
+    fn is_brushing(&self) -> bool {
+        self.brush_x.is_active()
     }
 }
 
@@ -425,87 +570,14 @@ impl MultiLineChartHandle {
 /// - Scroll/pinch: zoom X about cursor
 /// - Drag: pan X
 pub fn multi_line_chart(handle: MultiLineChartHandle) -> impl ElementBuilder {
-    let model_plot = handle.0.clone();
-    let model_overlay = handle.0.clone();
+    multi_line_chart_with_bindings(handle, crate::ChartInputBindings::default())
+}
 
-    let model_move = handle.0.clone();
-    let model_scroll = handle.0.clone();
-    let model_pinch = handle.0.clone();
-    let model_down = handle.0.clone();
-    let model_drag = handle.0.clone();
-    let model_up = handle.0.clone();
-    let model_drag_end = handle.0.clone();
-
-    stack()
-        .w_full()
-        .h_full()
-        .overflow_clip()
-        .cursor(blinc_layout::element::CursorStyle::Crosshair)
-        .on_mouse_move(move |e| {
-            if let Ok(mut m) = model_move.lock() {
-                m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_down(move |e| {
-            if let Ok(mut m) = model_down.lock() {
-                m.on_mouse_down(e.shift, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_scroll(move |e| {
-            if let Ok(mut m) = model_scroll.lock() {
-                m.on_scroll(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_pinch(move |e| {
-            if let Ok(mut m) = model_pinch.lock() {
-                m.on_pinch(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag(move |e| {
-            if let Ok(mut m) = model_drag.lock() {
-                if e.shift {
-                    m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                } else {
-                    m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                }
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_up(move |e| {
-            if let Ok(mut m) = model_up.lock() {
-                let _ = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height);
-                m.on_drag_end();
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag_end(move |_e| {
-            if let Ok(mut m) = model_drag_end.lock() {
-                m.on_drag_end();
-            }
-        })
-        .child(
-            canvas(move |ctx, bounds| {
-                if let Ok(mut m) = model_plot.lock() {
-                    m.render_plot(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full(),
-        )
-        .child(
-            canvas(move |ctx, bounds| {
-                if let Ok(mut m) = model_overlay.lock() {
-                    m.render_overlay(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full()
-            .foreground(),
-        )
+pub fn multi_line_chart_with_bindings(
+    handle: MultiLineChartHandle,
+    bindings: crate::ChartInputBindings,
+) -> impl ElementBuilder {
+    crate::xy_stack::x_chart(handle.0, bindings)
 }
 
 /// Create a linked multi-line chart element (shared X domain + hover + selection).
@@ -515,135 +587,13 @@ pub fn linked_multi_line_chart(
     handle: MultiLineChartHandle,
     link: ChartLinkHandle,
 ) -> impl ElementBuilder {
-    let model_plot = handle.0.clone();
-    let model_overlay = handle.0.clone();
+    linked_multi_line_chart_with_bindings(handle, link, crate::ChartInputBindings::default())
+}
 
-    let model_move = handle.0.clone();
-    let model_scroll = handle.0.clone();
-    let model_pinch = handle.0.clone();
-    let model_down = handle.0.clone();
-    let model_drag = handle.0.clone();
-    let model_up = handle.0.clone();
-    let model_drag_end = handle.0.clone();
-
-    let link_move = link.clone();
-    let link_scroll = link.clone();
-    let link_pinch = link.clone();
-    let link_down = link.clone();
-    let link_drag = link.clone();
-    let link_up = link.clone();
-    let link_plot = link.clone();
-    let link_overlay = link.clone();
-
-    stack()
-        .w_full()
-        .h_full()
-        .overflow_clip()
-        .cursor(blinc_layout::element::CursorStyle::Crosshair)
-        .on_mouse_move(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_move.lock(), model_move.lock()) {
-                m.view.domain.x = l.x_domain;
-                m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
-
-                let (px, _py, pw, _ph) = m.plot_rect(e.bounds_width, e.bounds_height);
-                if pw > 0.0 && m.crosshair_x.is_some() {
-                    let x = m.view.px_to_x(e.local_x.clamp(px, px + pw), px, pw);
-                    l.set_hover_x(Some(x));
-                } else {
-                    l.set_hover_x(None);
-                }
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_down(move |e| {
-            if let (Ok(_l), Ok(mut m)) = (link_down.lock(), model_down.lock()) {
-                m.on_mouse_down(e.shift, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_scroll(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_scroll.lock(), model_scroll.lock()) {
-                m.view.domain.x = l.x_domain;
-                m.on_scroll(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
-                l.set_x_domain(m.view.domain.x);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_pinch(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_pinch.lock(), model_pinch.lock()) {
-                m.view.domain.x = l.x_domain;
-                m.on_pinch(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
-                l.set_x_domain(m.view.domain.x);
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_drag.lock(), model_drag.lock()) {
-                m.view.domain.x = l.x_domain;
-                if e.shift {
-                    m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                } else {
-                    m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
-                    l.set_x_domain(m.view.domain.x);
-                }
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_mouse_up(move |e| {
-            if let (Ok(mut l), Ok(mut m)) = (link_up.lock(), model_up.lock()) {
-                m.view.domain.x = l.x_domain;
-                if let Some(sel) = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height) {
-                    l.set_selection_x(Some(sel));
-                }
-                m.on_drag_end();
-                blinc_layout::stateful::request_redraw();
-            }
-        })
-        .on_drag_end(move |_e| {
-            if let Ok(mut m) = model_drag_end.lock() {
-                m.on_drag_end();
-            }
-        })
-        .child(
-            canvas(move |ctx, bounds| {
-                if let (Ok(l), Ok(mut m)) = (link_plot.lock(), model_plot.lock()) {
-                    m.view.domain.x = l.x_domain;
-                    m.render_plot(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full(),
-        )
-        .child(
-            canvas(move |ctx, bounds| {
-                if let (Ok(l), Ok(mut m)) = (link_overlay.lock(), model_overlay.lock()) {
-                    m.view.domain.x = l.x_domain;
-                    if let Some((a, b)) = l.selection_x {
-                        let (px, py, pw, ph) = m.plot_rect(bounds.width, bounds.height);
-                        if pw > 0.0 && ph > 0.0 {
-                            let xa = m.view.x_to_px(a, px, pw);
-                            let xb = m.view.x_to_px(b, px, pw);
-                            let x0 = xa.min(xb).clamp(px, px + pw);
-                            let x1 = xa.max(xb).clamp(px, px + pw);
-                            ctx.fill_rect(
-                                Rect::new(x0, py, (x1 - x0).max(1.0), ph),
-                                0.0.into(),
-                                Brush::Solid(Color::rgba(1.0, 1.0, 1.0, 0.06)),
-                            );
-                        }
-                    }
-
-                    if let Some(hx) = l.hover_x {
-                        let (px, _py, pw, _ph) = m.plot_rect(bounds.width, bounds.height);
-                        if pw > 0.0 {
-                            m.crosshair_x = Some(m.view.x_to_px(hx, px, pw));
-                        }
-                    }
-                    m.render_overlay(ctx, bounds.width, bounds.height);
-                }
-            })
-            .w_full()
-            .h_full()
-            .foreground(),
-        )
+pub fn linked_multi_line_chart_with_bindings(
+    handle: MultiLineChartHandle,
+    link: ChartLinkHandle,
+    bindings: crate::ChartInputBindings,
+) -> impl ElementBuilder {
+    crate::xy_stack::linked_x_chart(handle.0, link, bindings)
 }
