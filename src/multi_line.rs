@@ -412,7 +412,8 @@ impl MultiLineChartModel {
 
                 if end > a + 1 && end <= b {
                     let start_idx = self.cached_points_px.len();
-                    self.cached_points_px.extend_from_slice(&self.scratch_px[a..end]);
+                    self.cached_points_px
+                        .extend_from_slice(&self.scratch_px[a..end]);
                     let end_idx = self.cached_points_px.len();
                     self.cached_runs.push(CachedRun {
                         start: start_idx,

@@ -27,10 +27,7 @@ impl ModifiersReq {
     }
 
     pub fn matches(&self, shift: bool, ctrl: bool, alt: bool, meta: bool) -> bool {
-        (!self.shift || shift)
-            && (!self.ctrl || ctrl)
-            && (!self.alt || alt)
-            && (!self.meta || meta)
+        (!self.shift || shift) && (!self.ctrl || ctrl) && (!self.alt || alt) && (!self.meta || meta)
     }
 }
 
@@ -93,4 +90,3 @@ mod tests {
         assert!(!r.matches(false, true, false, false));
     }
 }
-

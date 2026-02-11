@@ -35,11 +35,22 @@ pub(crate) trait InteractiveXChartModel: Send + 'static {
     fn is_brushing(&self) -> bool;
 }
 
-fn drag_action(bindings: ChartInputBindings, e: &blinc_layout::event_handler::EventContext) -> DragAction {
-    if bindings.brush_drag.required.matches(e.shift, e.ctrl, e.alt, e.meta) {
+fn drag_action(
+    bindings: ChartInputBindings,
+    e: &blinc_layout::event_handler::EventContext,
+) -> DragAction {
+    if bindings
+        .brush_drag
+        .required
+        .matches(e.shift, e.ctrl, e.alt, e.meta)
+    {
         return bindings.brush_drag.action;
     }
-    if bindings.pan_drag.required.matches(e.shift, e.ctrl, e.alt, e.meta) {
+    if bindings
+        .pan_drag
+        .required
+        .matches(e.shift, e.ctrl, e.alt, e.meta)
+    {
         return bindings.pan_drag.action;
     }
     DragAction::None
@@ -144,8 +155,12 @@ pub(crate) fn x_chart<M: InteractiveXChartModel>(
                 };
                 match action {
                     DragAction::None => {}
-                    DragAction::PanX => m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height),
-                    DragAction::BrushX => m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height),
+                    DragAction::PanX => {
+                        m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height)
+                    }
+                    DragAction::BrushX => {
+                        m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height)
+                    }
                 }
                 blinc_layout::stateful::request_redraw();
             }
@@ -309,7 +324,12 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
                     m.view_mut().domain.x = l.x_domain;
 
                     if let Some(sel) = l.selection_x {
-                        draw_link_selection_x(ctx, m.view(), m.plot_rect(bounds.width, bounds.height), sel);
+                        draw_link_selection_x(
+                            ctx,
+                            m.view(),
+                            m.plot_rect(bounds.width, bounds.height),
+                            sel,
+                        );
                     }
 
                     apply_link_hover_x(&mut *m, l.hover_x, bounds.width, bounds.height);
@@ -321,4 +341,3 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
             .foreground(),
         )
 }
-
