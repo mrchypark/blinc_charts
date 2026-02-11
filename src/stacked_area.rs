@@ -246,7 +246,9 @@ impl StackedAreaChartModel {
             StackedAreaMode::Streamgraph => Domain1D::new(-y_max * 0.55, y_max * 0.55),
         };
 
-        let Some(first) = self.series.first() else { return };
+        let Some(first) = self.series.first() else {
+            return;
+        };
 
         let i0 = first.lower_bound_x(self.view.domain.x.min);
         let i1 = first.upper_bound_x(self.view.domain.x.max);
@@ -303,14 +305,14 @@ impl StackedAreaChartModel {
             let mut bot_pts = Vec::with_capacity(sample_n);
             for (k, &i) in xs.iter().enumerate() {
                 let x = first.x[i];
-                top_pts.push(self.view.data_to_px(Point::new(x, tops[s][k]), px, py, pw, ph));
-                bot_pts.push(self.view.data_to_px(
-                    Point::new(x, bottoms[s][k]),
-                    px,
-                    py,
-                    pw,
-                    ph,
-                ));
+                top_pts.push(
+                    self.view
+                        .data_to_px(Point::new(x, tops[s][k]), px, py, pw, ph),
+                );
+                bot_pts.push(
+                    self.view
+                        .data_to_px(Point::new(x, bottoms[s][k]), px, py, pw, ph),
+                );
             }
             if top_pts.len() < 2 {
                 continue;

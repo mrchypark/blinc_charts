@@ -60,7 +60,10 @@ pub struct StatisticsChartModel {
 
 impl StatisticsChartModel {
     pub fn new(groups: Vec<Vec<f32>>) -> anyhow::Result<Self> {
-        anyhow::ensure!(!groups.is_empty(), "StatisticsChartModel requires non-empty groups");
+        anyhow::ensure!(
+            !groups.is_empty(),
+            "StatisticsChartModel requires non-empty groups"
+        );
         anyhow::ensure!(
             groups.iter().any(|g| g.iter().any(|v| v.is_finite())),
             "StatisticsChartModel requires at least one finite value"
@@ -144,7 +147,13 @@ impl StatisticsChartModel {
                 }
             }
 
-            self.group_stats.push(Some(GroupStats { q1, med, q3, lo, hi }));
+            self.group_stats.push(Some(GroupStats {
+                q1,
+                med,
+                q3,
+                lo,
+                hi,
+            }));
         }
     }
 
@@ -271,9 +280,8 @@ impl StatisticsChartModel {
         // Only draw groups within the current X domain.
         let n = self.groups.len();
         let i0 = (self.view.domain.x.min.floor() as isize).clamp(0, n as isize) as usize;
-        let i1 = (self.view.domain.x.max.ceil() as isize)
-            .clamp(i0 as isize + 1, n as isize)
-            as usize;
+        let i1 =
+            (self.view.domain.x.max.ceil() as isize).clamp(i0 as isize + 1, n as isize) as usize;
 
         for i in i0..i1 {
             let Some(st) = self.group_stats.get(i).and_then(|s| *s) else {
@@ -327,12 +335,18 @@ impl StatisticsChartModel {
             );
             let cap = (box_w * 0.4).clamp(6.0, 18.0);
             ctx.stroke_polyline(
-                &[Point::new(xw - cap * 0.5, lo), Point::new(xw + cap * 0.5, lo)],
+                &[
+                    Point::new(xw - cap * 0.5, lo),
+                    Point::new(xw + cap * 0.5, lo),
+                ],
                 &stroke,
                 Brush::Solid(self.style.accent),
             );
             ctx.stroke_polyline(
-                &[Point::new(xw - cap * 0.5, hi), Point::new(xw + cap * 0.5, hi)],
+                &[
+                    Point::new(xw - cap * 0.5, hi),
+                    Point::new(xw + cap * 0.5, hi),
+                ],
                 &stroke,
                 Brush::Solid(self.style.accent),
             );

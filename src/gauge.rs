@@ -101,7 +101,10 @@ impl GaugeChartModel {
         let needle_w = (self.style.stroke_width * 0.18).max(2.0);
         let needle = Stroke::new(needle_w);
         ctx.stroke_polyline(
-            &[Point::new(cx, cy), Point::new(cx + needle_len * av.cos(), cy + needle_len * av.sin())],
+            &[
+                Point::new(cx, cy),
+                Point::new(cx + needle_len * av.cos(), cy + needle_len * av.sin()),
+            ],
             &needle,
             Brush::Solid(self.style.needle),
         );
@@ -189,7 +192,10 @@ pub struct FunnelChartModel {
 
 impl FunnelChartModel {
     pub fn new(stages: Vec<(String, f32)>) -> anyhow::Result<Self> {
-        anyhow::ensure!(!stages.is_empty(), "FunnelChartModel requires non-empty stages");
+        anyhow::ensure!(
+            !stages.is_empty(),
+            "FunnelChartModel requires non-empty stages"
+        );
         anyhow::ensure!(
             stages.iter().any(|(_l, v)| v.is_finite() && *v > 0.0),
             "FunnelChartModel requires at least one positive finite value"

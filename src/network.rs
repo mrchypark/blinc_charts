@@ -79,12 +79,12 @@ pub struct NetworkChartModel {
 
 impl NetworkChartModel {
     pub fn new_graph(nodes: Vec<String>, edges: Vec<(usize, usize)>) -> anyhow::Result<Self> {
-        anyhow::ensure!(!nodes.is_empty(), "NetworkChartModel(graph) requires non-empty nodes");
+        anyhow::ensure!(
+            !nodes.is_empty(),
+            "NetworkChartModel(graph) requires non-empty nodes"
+        );
 
-        let links: Vec<(usize, usize, f32)> = edges
-            .into_iter()
-            .map(|(a, b)| (a, b, 1.0))
-            .collect();
+        let links: Vec<(usize, usize, f32)> = edges.into_iter().map(|(a, b)| (a, b, 1.0)).collect();
         Ok(Self::new(NetworkMode::Graph, nodes, links, Vec::new())?)
     }
 
@@ -110,8 +110,7 @@ impl NetworkChartModel {
             "NetworkChartModel(chord) requires non-empty matrix"
         );
         anyhow::ensure!(
-            matrix.len() == labels.len()
-                && matrix.iter().all(|row| row.len() == labels.len()),
+            matrix.len() == labels.len() && matrix.iter().all(|row| row.len() == labels.len()),
             "chord matrix must be NxN matching label count"
         );
 
@@ -206,7 +205,12 @@ impl NetworkChartModel {
         let mut best = None::<(usize, f32)>;
         let max_n = self.labels.len().min(self.style.max_nodes);
         for i in 0..max_n {
-            let p = self.layout.node_pos.get(i).copied().unwrap_or(Point::new(0.0, 0.0));
+            let p = self
+                .layout
+                .node_pos
+                .get(i)
+                .copied()
+                .unwrap_or(Point::new(0.0, 0.0));
             let sp = self.view.data_to_px(p, px, py, pw, ph);
             let dx = sp.x - local_x;
             let dy = sp.y - local_y;
@@ -216,9 +220,7 @@ impl NetworkChartModel {
             }
         }
         let hit_r = (self.style.node_radius * 1.6).max(8.0);
-        self.hover_node = best
-            .filter(|(_i, d2)| *d2 <= hit_r * hit_r)
-            .map(|(i, _)| i);
+        self.hover_node = best.filter(|(_i, d2)| *d2 <= hit_r * hit_r).map(|(i, _)| i);
     }
 
     pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, cursor_y_px: f32, w: f32, h: f32) {
@@ -323,14 +325,20 @@ impl NetworkChartModel {
             if a >= n || b >= n {
                 continue;
             }
-            let pa = self.view.data_to_px(self.layout.node_pos[a], px, py, pw, ph);
-            let pb = self.view.data_to_px(self.layout.node_pos[b], px, py, pw, ph);
+            let pa = self
+                .view
+                .data_to_px(self.layout.node_pos[a], px, py, pw, ph);
+            let pb = self
+                .view
+                .data_to_px(self.layout.node_pos[b], px, py, pw, ph);
             ctx.stroke_polyline(&[pa, pb], &link_stroke, Brush::Solid(self.style.link));
         }
 
         let node_stroke = Stroke::new(1.0);
         for i in 0..n {
-            let p = self.view.data_to_px(self.layout.node_pos[i], px, py, pw, ph);
+            let p = self
+                .view
+                .data_to_px(self.layout.node_pos[i], px, py, pw, ph);
             let r = self.style.node_radius.max(2.0);
             ctx.fill_circle(p, r, Brush::Solid(self.style.node));
             ctx.stroke_circle(
@@ -390,7 +398,12 @@ impl NetworkChartModel {
                 8.0.into(),
                 Brush::Solid(Color::rgba(0.35, 0.65, 1.0, 0.35)),
             );
-            ctx.stroke_rect(*r, 8.0.into(), &stroke, Brush::Solid(self.style.border_color()));
+            ctx.stroke_rect(
+                *r,
+                8.0.into(),
+                &stroke,
+                Brush::Solid(self.style.border_color()),
+            );
             if r.width() >= 60.0 {
                 let style = TextStyle::new(11.0).with_color(self.style.text);
                 ctx.draw_text(

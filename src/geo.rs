@@ -50,9 +50,14 @@ pub struct GeoChartModel {
 
 impl GeoChartModel {
     pub fn new(shapes: Vec<Vec<Point>>) -> anyhow::Result<Self> {
-        anyhow::ensure!(!shapes.is_empty(), "GeoChartModel requires non-empty shapes");
         anyhow::ensure!(
-            shapes.iter().any(|s| s.iter().any(|p| p.x.is_finite() && p.y.is_finite())),
+            !shapes.is_empty(),
+            "GeoChartModel requires non-empty shapes"
+        );
+        anyhow::ensure!(
+            shapes
+                .iter()
+                .any(|s| s.iter().any(|p| p.x.is_finite() && p.y.is_finite())),
             "GeoChartModel requires at least one finite point"
         );
 

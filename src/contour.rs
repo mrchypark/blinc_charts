@@ -263,7 +263,8 @@ impl ContourChartModel {
         if pw <= 0.0 || ph <= 0.0 {
             return;
         }
-        self.brush.begin(local_x.clamp(px, px + pw), local_y.clamp(py, py + ph));
+        self.brush
+            .begin(local_x.clamp(px, px + pw), local_y.clamp(py, py + ph));
         self.last_drag_total_x = None;
         self.last_drag_total_y = None;
     }
@@ -527,7 +528,13 @@ pub fn contour_chart(handle: ContourChartHandle) -> impl ElementBuilder {
         })
         .on_mouse_down(move |e| {
             if let Ok(mut m) = model_down.lock() {
-                m.on_mouse_down(e.shift, e.local_x, e.local_y, e.bounds_width, e.bounds_height);
+                m.on_mouse_down(
+                    e.shift,
+                    e.local_x,
+                    e.local_y,
+                    e.bounds_width,
+                    e.bounds_height,
+                );
                 blinc_layout::stateful::request_redraw();
             }
         })

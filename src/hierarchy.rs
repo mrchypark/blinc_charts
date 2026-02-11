@@ -84,9 +84,15 @@ impl HierarchyNode {
     }
 
     fn validate_finite(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(!self.label.is_empty(), "HierarchyNode label must be non-empty");
+        anyhow::ensure!(
+            !self.label.is_empty(),
+            "HierarchyNode label must be non-empty"
+        );
         if self.is_leaf() {
-            anyhow::ensure!(self.value.is_finite(), "Hierarchy leaf value must be finite");
+            anyhow::ensure!(
+                self.value.is_finite(),
+                "Hierarchy leaf value must be finite"
+            );
         }
         for c in &self.children {
             c.validate_finite()?;
@@ -182,28 +188,14 @@ impl HierarchyChartModel {
             HierarchyMode::Icicle => {
                 let max_depth = self.max_depth(&root);
                 let level_h = (ph / (max_depth.max(1) as f32 + 1.0)).max(1.0);
-                self.layout_icicle(
-                    &root,
-                    Rect::new(px, py, pw, level_h),
-                    0,
-                    max_depth,
-                );
+                self.layout_icicle(&root, Rect::new(px, py, pw, level_h), 0, max_depth);
             }
             HierarchyMode::Sunburst => {
                 let max_depth = self.max_depth(&root);
                 let r = (pw.min(ph) * 0.48).max(10.0);
                 let cx = px + pw * 0.5;
                 let cy = py + ph * 0.5;
-                self.layout_sunburst(
-                    &root,
-                    0.0,
-                    std::f32::consts::TAU,
-                    0,
-                    max_depth,
-                    cx,
-                    cy,
-                    r,
-                );
+                self.layout_sunburst(&root, 0.0, std::f32::consts::TAU, 0, max_depth, cx, cy, r);
             }
             HierarchyMode::Packing => {
                 let cx = px + pw * 0.5;
@@ -225,7 +217,12 @@ impl HierarchyChartModel {
         if n.children.is_empty() {
             0
         } else {
-            1 + n.children.iter().map(|c| self.max_depth(c)).max().unwrap_or(0)
+            1 + n
+                .children
+                .iter()
+                .map(|c| self.max_depth(c))
+                .max()
+                .unwrap_or(0)
         }
     }
 
@@ -267,13 +264,7 @@ impl HierarchyChartModel {
         }
     }
 
-    fn layout_icicle(
-        &mut self,
-        n: &HierarchyNode,
-        rect: Rect,
-        depth: usize,
-        max_depth: usize,
-    ) {
+    fn layout_icicle(&mut self, n: &HierarchyNode, rect: Rect, depth: usize, max_depth: usize) {
         if depth >= max_depth || n.children.is_empty() {
             self.leaves_px.push(LeafRect {
                 rect,
@@ -540,10 +531,7 @@ impl HierarchyChartModel {
                         path = path.line_to(p.x, p.y);
                     }
                     path = path.close();
-                    ctx.fill_path(
-                        &path,
-                        Brush::Solid(self.leaf_color(leaf.depth, i)),
-                    );
+                    ctx.fill_path(&path, Brush::Solid(self.leaf_color(leaf.depth, i)));
                 }
 
                 // Outline rings for readability.

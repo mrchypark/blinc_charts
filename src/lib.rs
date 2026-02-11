@@ -18,18 +18,18 @@ mod view;
 pub mod area;
 pub mod bar;
 pub mod candlestick;
-pub mod heatmap;
-pub mod histogram;
-pub mod line;
-pub mod multi_line;
-pub mod scatter;
 pub mod contour;
 pub mod density_map;
 pub mod gauge;
 pub mod geo;
+pub mod heatmap;
 pub mod hierarchy;
+pub mod histogram;
+pub mod line;
+pub mod multi_line;
 pub mod network;
 pub mod polar;
+pub mod scatter;
 pub mod stacked_area;
 pub mod statistics;
 
@@ -53,18 +53,23 @@ pub mod prelude {
         candlestick_chart, linked_candlestick_chart, Candle, CandleSeries, CandlestickChartHandle,
         CandlestickChartModel, CandlestickChartStyle,
     };
-    pub use crate::contour::{contour_chart, ContourChartHandle, ContourChartModel, ContourChartStyle};
+    pub use crate::contour::{
+        contour_chart, ContourChartHandle, ContourChartModel, ContourChartStyle,
+    };
     pub use crate::density_map::{
         density_map_chart, DensityMapChartHandle, DensityMapChartModel, DensityMapChartStyle,
     };
-    pub use crate::gauge::{funnel_chart, gauge_chart, FunnelChartHandle, FunnelChartModel, FunnelChartStyle, GaugeChartHandle, GaugeChartModel, GaugeChartStyle};
+    pub use crate::gauge::{
+        funnel_chart, gauge_chart, FunnelChartHandle, FunnelChartModel, FunnelChartStyle,
+        GaugeChartHandle, GaugeChartModel, GaugeChartStyle,
+    };
     pub use crate::geo::{geo_chart, GeoChartHandle, GeoChartModel, GeoChartStyle};
     pub use crate::heatmap::{
         heatmap_chart, HeatmapChartHandle, HeatmapChartModel, HeatmapChartStyle,
     };
     pub use crate::hierarchy::{
         hierarchy_chart, HierarchyChartHandle, HierarchyChartModel, HierarchyChartStyle,
-        HierarchyNode, HierarchyMode,
+        HierarchyMode, HierarchyNode,
     };
     pub use crate::histogram::{
         histogram_chart, HistogramChartHandle, HistogramChartModel, HistogramChartStyle,
@@ -80,7 +85,9 @@ pub mod prelude {
     pub use crate::network::{
         network_chart, NetworkChartHandle, NetworkChartModel, NetworkChartStyle, NetworkMode,
     };
-    pub use crate::polar::{polar_chart, PolarChartHandle, PolarChartModel, PolarChartMode, PolarChartStyle};
+    pub use crate::polar::{
+        polar_chart, PolarChartHandle, PolarChartMode, PolarChartModel, PolarChartStyle,
+    };
     pub use crate::scatter::{
         linked_scatter_chart, scatter_chart, ScatterChartHandle, ScatterChartModel,
         ScatterChartStyle,

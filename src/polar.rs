@@ -77,10 +77,7 @@ impl PolarChartModel {
             "each series must match dimensions length"
         );
         anyhow::ensure!(
-            series
-                .iter()
-                .flatten()
-                .any(|v| v.is_finite()),
+            series.iter().flatten().any(|v| v.is_finite()),
             "PolarChartModel(radar) requires at least one finite value"
         );
 
@@ -162,7 +159,11 @@ impl PolarChartModel {
 
     fn render_parallel_stub(&self, ctx: &mut dyn DrawContext, px: f32, py: f32, pw: f32, ph: f32) {
         let style = TextStyle::new(12.0).with_color(self.style.text);
-        ctx.draw_text("parallel (uses radar v1)", Point::new(px + 6.0, py + 6.0), &style);
+        ctx.draw_text(
+            "parallel (uses radar v1)",
+            Point::new(px + 6.0, py + 6.0),
+            &style,
+        );
         self.render_radar(ctx, px, py, pw, ph);
     }
 
@@ -206,7 +207,11 @@ impl PolarChartModel {
             let mut pts = Vec::with_capacity(dims_n + 1);
             for i in 0..dims_n {
                 let v = vals.get(i).copied().unwrap_or(0.0);
-                let v = if v.is_finite() { v } else { self.style.min_value };
+                let v = if v.is_finite() {
+                    v
+                } else {
+                    self.style.min_value
+                };
                 let t = ((v - self.style.min_value) * inv).clamp(0.0, 1.0);
                 let rr = r * t;
                 let a = (i as f32 / dims_n as f32) * std::f32::consts::TAU
@@ -225,7 +230,10 @@ impl PolarChartModel {
                 }
                 path = path.close();
                 let c = self.series_color(s);
-                ctx.fill_path(&path, Brush::Solid(Color::rgba(c.r, c.g, c.b, self.style.fill_alpha)));
+                ctx.fill_path(
+                    &path,
+                    Brush::Solid(Color::rgba(c.r, c.g, c.b, self.style.fill_alpha)),
+                );
 
                 // Stroke
                 ctx.stroke_polyline(&pts, &Stroke::new(1.75), Brush::Solid(c));
@@ -238,7 +246,11 @@ impl PolarChartModel {
         if let Some(i) = self.hover_dim {
             if let Some(lbl) = self.dimensions.get(i) {
                 let style = TextStyle::new(12.0).with_color(self.style.text);
-                ctx.draw_text(&format!("dim={i}  {lbl}"), Point::new(px + 6.0, py + 6.0), &style);
+                ctx.draw_text(
+                    &format!("dim={i}  {lbl}"),
+                    Point::new(px + 6.0, py + 6.0),
+                    &style,
+                );
             }
         }
     }
