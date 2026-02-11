@@ -344,7 +344,8 @@ impl HierarchyChartModel {
         let mut placed: Vec<(f32, f32, f32, String, f32, usize)> = Vec::new(); // (x,y,rad,label,val,depth)
         for (i, (label, depth, w)) in leaves.into_iter().enumerate() {
             let rr = ((w / total).max(0.0)).sqrt() * r * 0.75;
-            let rr = rr.clamp(4.0, r * 0.35);
+            let max_rr = (r * 0.35).max(4.0);
+            let rr = rr.clamp(4.0, max_rr);
             if i == 0 {
                 placed.push((0.0, 0.0, rr, label, w, depth));
                 continue;
@@ -653,4 +654,24 @@ pub fn hierarchy_chart(handle: HierarchyChartHandle) -> impl ElementBuilder {
             .h_full()
             .foreground(),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinc_core::{RecordingContext, Size};
+
+    #[test]
+    fn packing_render_does_not_panic_on_small_viewport() {
+        let root = HierarchyNode::node("root", vec![HierarchyNode::leaf("a", 1.0)]);
+        let mut model = HierarchyChartModel::new(root).unwrap();
+        model.style.mode = HierarchyMode::Packing;
+
+        let mut ctx = RecordingContext::new(Size::new(50.0, 50.0));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            model.render_plot(&mut ctx, 50.0, 50.0);
+        }));
+
+        assert!(result.is_ok());
+    }
 }

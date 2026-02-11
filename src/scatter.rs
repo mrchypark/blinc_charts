@@ -232,9 +232,10 @@ impl ScatterChartModel {
         }
 
         // For scatter, keep a hard cap (points-per-frame) for both perf and minimal resources.
+        let max_style_points = self.style.max_points.max(512);
         let max_points = (pw.ceil() as usize)
             .saturating_mul(4)
-            .clamp(512, self.style.max_points);
+            .clamp(512, max_style_points);
         self.downsample_params.max_points = self.user_max_points.min(max_points);
 
         downsample_min_max(
@@ -408,4 +409,24 @@ pub fn linked_scatter_chart_with_bindings(
     bindings: crate::ChartInputBindings,
 ) -> impl ElementBuilder {
     crate::xy_stack::linked_x_chart(handle.0, link, bindings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinc_core::{RecordingContext, Size};
+
+    #[test]
+    fn render_plot_does_not_panic_when_style_max_points_is_below_internal_minimum() {
+        let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
+        let mut model = ScatterChartModel::new(series);
+        model.style.max_points = 64;
+
+        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            model.render_plot(&mut ctx, 320.0, 200.0);
+        }));
+
+        assert!(result.is_ok());
+    }
 }

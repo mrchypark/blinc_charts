@@ -282,8 +282,10 @@ impl StatisticsChartModel {
         // Only draw groups within the current X domain.
         let n = self.groups.len();
         let i0 = (self.view.domain.x.min.floor() as isize).clamp(0, n as isize) as usize;
-        let i1 =
-            (self.view.domain.x.max.ceil() as isize).clamp(i0 as isize + 1, n as isize) as usize;
+        let i1 = (self.view.domain.x.max.ceil() as isize).clamp(0, n as isize) as usize;
+        if i0 >= i1 {
+            return;
+        }
 
         for i in i0..i1 {
             let Some(st) = self.group_stats.get(i).and_then(|s| *s) else {
@@ -475,4 +477,23 @@ pub fn statistics_chart_with_bindings(
     bindings: crate::ChartInputBindings,
 ) -> impl ElementBuilder {
     crate::xy_stack::x_chart(handle.0, bindings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinc_core::{RecordingContext, Size};
+
+    #[test]
+    fn render_plot_does_not_panic_when_x_domain_is_outside_groups() {
+        let mut model = StatisticsChartModel::new(vec![vec![1.0, 2.0, 3.0]]).unwrap();
+        model.view.domain.x = Domain1D::new(10.0, 11.0);
+
+        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            model.render_plot(&mut ctx, 320.0, 200.0);
+        }));
+
+        assert!(result.is_ok());
+    }
 }

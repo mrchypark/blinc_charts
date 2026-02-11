@@ -86,6 +86,13 @@ impl BarChartModel {
             !series.is_empty(),
             "BarChartModel requires at least 1 series"
         );
+        anyhow::ensure!(
+            !series
+                .iter()
+                .flat_map(|s| s.y.iter())
+                .any(|v| v.is_finite() && *v < 0.0),
+            "BarChartModel does not support negative values"
+        );
 
         let mut x_min = f32::INFINITY;
         let mut x_max = f32::NEG_INFINITY;
@@ -516,4 +523,15 @@ pub fn linked_bar_chart_with_bindings(
     bindings: crate::ChartInputBindings,
 ) -> impl ElementBuilder {
     crate::xy_stack::linked_x_chart(handle.0, link, bindings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_rejects_negative_values() {
+        let series = TimeSeriesF32::new(vec![0.0, 1.0], vec![1.0, -0.5]).unwrap();
+        assert!(BarChartModel::new(vec![series]).is_err());
+    }
 }

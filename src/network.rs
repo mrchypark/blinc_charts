@@ -195,26 +195,79 @@ impl NetworkChartModel {
             return;
         }
 
-        // Find nearest node in screen space (capped).
-        let mut best = None::<(usize, f32)>;
-        let max_n = self.labels.len().min(self.style.max_nodes);
-        for i in 0..max_n {
-            let p = self
-                .layout
-                .node_pos
-                .get(i)
-                .copied()
-                .unwrap_or(Point::new(0.0, 0.0));
-            let sp = self.view.data_to_px(p, px, py, pw, ph);
-            let dx = sp.x - local_x;
-            let dy = sp.y - local_y;
-            let d2 = dx * dx + dy * dy;
-            if best.map(|b| d2 < b.1).unwrap_or(true) {
-                best = Some((i, d2));
+        let hit_r = (self.style.node_radius * 1.6).max(8.0);
+        match self.mode {
+            NetworkMode::Graph => {
+                // Find nearest node in screen space (capped).
+                let mut best = None::<(usize, f32)>;
+                let max_n = self
+                    .labels
+                    .len()
+                    .min(self.style.max_nodes)
+                    .min(self.layout.node_pos.len());
+                for i in 0..max_n {
+                    let p = self.layout.node_pos[i];
+                    let sp = self.view.data_to_px(p, px, py, pw, ph);
+                    let dx = sp.x - local_x;
+                    let dy = sp.y - local_y;
+                    let d2 = dx * dx + dy * dy;
+                    if best.map(|b| d2 < b.1).unwrap_or(true) {
+                        best = Some((i, d2));
+                    }
+                }
+                self.hover_node = best.filter(|(_i, d2)| *d2 <= hit_r * hit_r).map(|(i, _)| i);
+            }
+            NetworkMode::Sankey => {
+                // Match the render_sankey node layout exactly.
+                let n = self.labels.len().min(self.style.max_nodes);
+                if n == 0 {
+                    self.hover_node = None;
+                    return;
+                }
+                let cols = 3usize;
+                let col_w = pw / cols as f32;
+                let row_h = (ph / ((n as f32 / cols as f32).ceil().max(1.0))).max(24.0);
+
+                let mut best = None::<(usize, f32)>;
+                for i in 0..n {
+                    let col = i % cols;
+                    let row = i / cols;
+                    let x = px + col as f32 * col_w + col_w * 0.15;
+                    let y = py + row as f32 * row_h + row_h * 0.15;
+                    let rw = col_w * 0.70;
+                    let rh = row_h * 0.70;
+                    let cx = x + rw * 0.5;
+                    let cy = y + rh * 0.5;
+                    let dx = cx - local_x;
+                    let dy = cy - local_y;
+                    let d2 = dx * dx + dy * dy;
+                    if best.map(|b| d2 < b.1).unwrap_or(true) {
+                        best = Some((i, d2));
+                    }
+                }
+                self.hover_node = best.filter(|(_i, d2)| *d2 <= hit_r * hit_r).map(|(i, _)| i);
+            }
+            NetworkMode::Chord => {
+                // Match the render_chord marker layout exactly.
+                let n = self.labels.len().min(self.style.max_nodes).max(1);
+                let cx = px + pw * 0.5;
+                let cy = py + ph * 0.5;
+                let r = (pw.min(ph) * 0.42).max(10.0);
+                let node_pts = Self::circle_layout(n, r);
+
+                let mut best = None::<(usize, f32)>;
+                for (i, p) in node_pts.iter().enumerate() {
+                    let sp = Point::new(cx + p.x, cy + p.y);
+                    let dx = sp.x - local_x;
+                    let dy = sp.y - local_y;
+                    let d2 = dx * dx + dy * dy;
+                    if best.map(|b| d2 < b.1).unwrap_or(true) {
+                        best = Some((i, d2));
+                    }
+                }
+                self.hover_node = best.filter(|(_i, d2)| *d2 <= hit_r * hit_r).map(|(i, _)| i);
             }
         }
-        let hit_r = (self.style.node_radius * 1.6).max(8.0);
-        self.hover_node = best.filter(|(_i, d2)| *d2 <= hit_r * hit_r).map(|(i, _)| i);
     }
 
     pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, cursor_y_px: f32, w: f32, h: f32) {
@@ -311,7 +364,11 @@ impl NetworkChartModel {
     }
 
     fn render_graph(&self, ctx: &mut dyn DrawContext, px: f32, py: f32, pw: f32, ph: f32) {
-        let n = self.labels.len().min(self.style.max_nodes);
+        let n = self
+            .labels
+            .len()
+            .min(self.style.max_nodes)
+            .min(self.layout.node_pos.len());
         let links_n = self.links.len().min(self.style.max_links);
 
         let link_stroke = Stroke::new(1.0);
@@ -319,20 +376,21 @@ impl NetworkChartModel {
             if a >= n || b >= n {
                 continue;
             }
-            let pa = self
-                .view
-                .data_to_px(self.layout.node_pos[a], px, py, pw, ph);
-            let pb = self
-                .view
-                .data_to_px(self.layout.node_pos[b], px, py, pw, ph);
+            let (Some(da), Some(db)) = (self.layout.node_pos.get(a), self.layout.node_pos.get(b))
+            else {
+                continue;
+            };
+            let pa = self.view.data_to_px(*da, px, py, pw, ph);
+            let pb = self.view.data_to_px(*db, px, py, pw, ph);
             ctx.stroke_polyline(&[pa, pb], &link_stroke, Brush::Solid(self.style.link));
         }
 
         let node_stroke = Stroke::new(1.0);
         for i in 0..n {
-            let p = self
-                .view
-                .data_to_px(self.layout.node_pos[i], px, py, pw, ph);
+            let Some(dp) = self.layout.node_pos.get(i) else {
+                continue;
+            };
+            let p = self.view.data_to_px(*dp, px, py, pw, ph);
             let r = self.style.node_radius.max(2.0);
             ctx.fill_circle(p, r, Brush::Solid(self.style.node));
             ctx.stroke_circle(
@@ -572,4 +630,45 @@ pub fn network_chart(handle: NetworkChartHandle) -> impl ElementBuilder {
             .h_full()
             .foreground(),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinc_core::{RecordingContext, Size};
+
+    #[test]
+    fn sankey_hover_uses_sankey_layout_positions() {
+        let mut model = NetworkChartModel::new_sankey(
+            vec!["A".into(), "B".into(), "C".into()],
+            vec![(0, 1, 1.0), (1, 2, 1.0)],
+        )
+        .unwrap();
+
+        let (px, py, pw, ph) = model.plot_rect(300.0, 200.0);
+        let cols = 3usize;
+        let col_w = pw / cols as f32;
+        let row_h = (ph / ((3.0f32 / cols as f32).ceil().max(1.0))).max(24.0);
+
+        let x = px + col_w * 0.15 + col_w * 0.70 * 0.5;
+        let y = py + row_h * 0.15 + row_h * 0.70 * 0.5;
+        model.on_mouse_move(x, y, 300.0, 200.0);
+
+        assert_eq!(model.hover_node, Some(0));
+    }
+
+    #[test]
+    fn graph_render_does_not_panic_when_max_nodes_exceeds_layout_size() {
+        let nodes: Vec<String> = (0..600).map(|i| format!("n{i}")).collect();
+        let mut model = NetworkChartModel::new_graph(nodes, vec![(550, 551)]).unwrap();
+        model.style.max_nodes = 600;
+        model.style.max_links = 8;
+
+        let mut ctx = RecordingContext::new(Size::new(360.0, 240.0));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            model.render_plot(&mut ctx, 360.0, 240.0);
+        }));
+
+        assert!(result.is_ok());
+    }
 }

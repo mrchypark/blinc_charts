@@ -290,7 +290,8 @@ impl CandlestickChartModel {
             return;
         }
 
-        let bins_n = (pw.ceil() as usize).clamp(16, self.style.max_candles);
+        let max_candles = self.style.max_candles.max(16);
+        let bins_n = (pw.ceil() as usize).clamp(16, max_candles);
         self.bins_n = bins_n;
         self.bins.clear();
         self.bins.resize(bins_n, Candle::default());
@@ -369,6 +370,9 @@ impl CandlestickChartModel {
         let wick_stroke = Stroke::new(self.style.stroke_width);
 
         for i in 0..self.bins_n {
+            if self.counts[i] == 0 {
+                continue;
+            }
             let c = self.bins[i];
             if !c.x.is_finite() || !c.high.is_finite() || !c.low.is_finite() {
                 continue;
@@ -528,4 +532,62 @@ pub fn linked_candlestick_chart_with_bindings(
     bindings: crate::ChartInputBindings,
 ) -> impl ElementBuilder {
     crate::xy_stack::linked_x_chart(handle.0, link, bindings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinc_core::{Brush, DrawCommand, RecordingContext, Size};
+
+    #[test]
+    fn render_plot_does_not_panic_when_style_max_candles_is_too_small() {
+        let series = CandleSeries::new(vec![Candle {
+            x: 1.0,
+            open: 10.0,
+            high: 12.0,
+            low: 9.0,
+            close: 11.0,
+        }])
+        .unwrap();
+        let mut model = CandlestickChartModel::new(series);
+        model.style.max_candles = 8;
+
+        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            model.render_plot(&mut ctx, 320.0, 200.0);
+        }));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn render_plot_skips_empty_bins() {
+        let series = CandleSeries::new(vec![Candle {
+            x: 1.0,
+            open: 10.0,
+            high: 12.0,
+            low: 9.0,
+            close: 11.0,
+        }])
+        .unwrap();
+        let mut model = CandlestickChartModel::new(series);
+        model.style.max_candles = 16;
+
+        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        model.render_plot(&mut ctx, 320.0, 200.0);
+
+        let mut body_count = 0usize;
+        for cmd in ctx.commands() {
+            if let DrawCommand::FillRect {
+                brush: Brush::Solid(c),
+                ..
+            } = cmd
+            {
+                if *c == model.style.up || *c == model.style.down {
+                    body_count += 1;
+                }
+            }
+        }
+        assert_eq!(body_count, 1);
+    }
 }

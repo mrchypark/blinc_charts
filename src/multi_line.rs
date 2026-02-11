@@ -357,7 +357,7 @@ impl MultiLineChartModel {
 
         // Per-series point cap: also bounded by pixels so we don't waste work.
         let px_cap = (pw.ceil() as usize).saturating_mul(2).clamp(64, 200_000);
-        let hard_per_series_cap = self.style.max_points_per_series.min(px_cap);
+        let hard_per_series_cap = self.style.max_points_per_series.max(2).min(px_cap);
 
         for (si, s) in self.series.iter().take(n).enumerate() {
             if remaining_segments == 0 {
@@ -531,10 +531,25 @@ impl InteractiveXChartModel for MultiLineChartModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use blinc_core::{RecordingContext, Size};
 
     #[test]
     fn new_rejects_empty_series() {
         assert!(MultiLineChartModel::new(Vec::new()).is_err());
+    }
+
+    #[test]
+    fn render_plot_does_not_panic_when_max_points_per_series_is_too_small() {
+        let s = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
+        let mut model = MultiLineChartModel::new(vec![s]).unwrap();
+        model.style.max_points_per_series = 1;
+
+        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            model.render_plot(&mut ctx, 320.0, 200.0);
+        }));
+
+        assert!(result.is_ok());
     }
 }
 
