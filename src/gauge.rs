@@ -99,7 +99,7 @@ impl GaugeChartModel {
         out
     }
 
-    pub fn render_plot(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
+    pub fn render_plot(&self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
         fill_bg(ctx, w, h, self.style.bg);
 
         let cx = w * 0.5;

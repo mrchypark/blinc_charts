@@ -40,6 +40,7 @@ pub fn point_in_polygon(p: Point, poly: &[Point]) -> bool {
             if dy.abs() < 1e-12 {
                 false
             } else {
+                // Boundary convention: points exactly on an edge are treated as outside.
                 p.x < (pj.x - pi.x) * (p.y - pi.y) / dy + pi.x
             }
         } else {
