@@ -16,6 +16,8 @@ use crate::triangulation::triangulate_fan;
 use crate::view::{ChartView, Domain1D, Domain2D};
 use crate::xy_stack::InteractiveXChartModel;
 
+const MESH_TRIANGULATION_POINT_LIMIT: usize = 512;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SampleKey {
     x_min: u32,
@@ -275,7 +277,7 @@ impl ScatterChartModel {
             self.points_px.push(pp);
         }
         self.spatial_index = Some(SpatialIndex::build(&self.points_px, 24, 24));
-        let mesh_n = self.downsampled.len().min(512);
+        let mesh_n = self.downsampled.len().min(MESH_TRIANGULATION_POINT_LIMIT);
         self.mesh_triangle_count = triangulate_fan(&self.downsampled[..mesh_n]).len();
 
         self.last_sample_key = Some(key);
