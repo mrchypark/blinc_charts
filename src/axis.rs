@@ -3,6 +3,8 @@ use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 use crate::scale::LinearScale;
 use crate::view::Domain1D;
 
+// DrawContext currently has no text-measurement API, so axis labels use a
+// stable width heuristic for approximate centering.
 const AVG_LABEL_CHAR_WIDTH_PX: f32 = 6.0;
 
 #[derive(Clone, Debug)]
