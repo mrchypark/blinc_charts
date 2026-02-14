@@ -11,7 +11,7 @@ fn label_width_px(ctx: &mut dyn DrawContext, label: &str, style: &TextStyle) -> 
         .measure_text(label, style)
         .map(|size| size.width)
         .unwrap_or(label.chars().count() as f32 * AVG_LABEL_CHAR_WIDTH_PX);
-    measured.clamp(10.0, 80.0)
+    measured.max(10.0)
 }
 
 #[derive(Clone, Debug)]
