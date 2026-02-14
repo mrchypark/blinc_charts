@@ -30,7 +30,7 @@ pub fn format_compact(value: f32) -> String {
 }
 
 fn format_with_suffix(value: f32, suffix: &str) -> String {
-    format!("{}{}", trim_trailing_zeroes(format!("{value:.1}")), suffix)
+    format!("{}{}", trim_trailing_zeroes(format!("{value:.2}")), suffix)
 }
 
 fn trim_trailing_zeroes(mut s: String) -> String {
@@ -53,5 +53,11 @@ mod tests {
     fn compact_uses_suffixes() {
         assert_eq!(format_compact(12_400.0), "12.4K");
         assert_eq!(format_compact(2_000_000.0), "2M");
+    }
+
+    #[test]
+    fn compact_keeps_useful_precision_for_close_values() {
+        assert_eq!(format_compact(1_210.0), "1.21K");
+        assert_eq!(format_compact(1_290.0), "1.29K");
     }
 }

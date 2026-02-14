@@ -189,7 +189,9 @@ pub fn gauge_chart(handle: GaugeChartHandle) -> impl ElementBuilder {
                 } else {
                     m.transition_step_sec
                 };
-                m.tick_transition(dt.clamp(1.0 / 240.0, 0.25));
+                // Clamp only the upper bound to avoid large jumps on frame drops,
+                // while preserving smooth progression on high-refresh displays.
+                m.tick_transition(dt.min(0.25));
                 m.render_plot(ctx, bounds.width, bounds.height);
                 if m.transition.is_some() {
                     blinc_layout::stateful::request_redraw();
