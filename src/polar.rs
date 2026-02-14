@@ -198,9 +198,10 @@ impl PolarChartModel {
 
         // Series lines.
         let max_series = self.series.len().min(self.style.max_series);
+        let mut pts = Vec::with_capacity(dims_n);
         for s in 0..max_series {
             let vals = &self.series[s];
-            let mut pts = Vec::with_capacity(dims_n);
+            pts.clear();
             for i in 0..dims_n {
                 let v = vals.get(i).copied().unwrap_or(self.style.min_value);
                 let v = if v.is_finite() {

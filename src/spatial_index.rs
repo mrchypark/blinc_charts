@@ -3,7 +3,8 @@ use blinc_core::Point;
 #[derive(Clone, Debug)]
 pub struct SpatialIndex {
     points: Vec<Point>,
-    cells: Vec<Vec<usize>>,
+    cell_offsets: Vec<usize>,
+    cell_indices: Vec<usize>,
     cols: usize,
     rows: usize,
     min_x: f32,
@@ -45,9 +46,10 @@ impl SpatialIndex {
             max_y = min_y + 1.0;
         }
 
-        let mut cells = vec![Vec::new(); cols * rows];
+        let cell_count = cols * rows;
         let mut owned_points = Vec::with_capacity(points.len());
-        for (i, p) in points.iter().enumerate() {
+        let mut cell_counts = vec![0usize; cell_count];
+        for p in points {
             owned_points.push(*p);
             if !p.x.is_finite() || !p.y.is_finite() {
                 continue;
@@ -58,12 +60,36 @@ impl SpatialIndex {
             let r = (((p.y - min_y) / (max_y - min_y)) * rows as f32)
                 .floor()
                 .clamp(0.0, (rows - 1) as f32) as usize;
-            cells[r * cols + c].push(i);
+            cell_counts[r * cols + c] += 1;
+        }
+
+        let mut cell_offsets = vec![0usize; cell_count + 1];
+        for i in 0..cell_count {
+            cell_offsets[i + 1] = cell_offsets[i] + cell_counts[i];
+        }
+        let mut cell_indices = vec![0usize; cell_offsets[cell_count]];
+        let mut cursors = cell_offsets[..cell_count].to_vec();
+
+        for (i, p) in owned_points.iter().enumerate() {
+            if !p.x.is_finite() || !p.y.is_finite() {
+                continue;
+            }
+            let c = (((p.x - min_x) / (max_x - min_x)) * cols as f32)
+                .floor()
+                .clamp(0.0, (cols - 1) as f32) as usize;
+            let r = (((p.y - min_y) / (max_y - min_y)) * rows as f32)
+                .floor()
+                .clamp(0.0, (rows - 1) as f32) as usize;
+            let cell = r * cols + c;
+            let cursor = &mut cursors[cell];
+            cell_indices[*cursor] = i;
+            *cursor += 1;
         }
 
         Self {
             points: owned_points,
-            cells,
+            cell_offsets,
+            cell_indices,
             cols,
             rows,
             min_x,
@@ -95,7 +121,10 @@ impl SpatialIndex {
         let mut best: Option<(usize, f32)> = None;
         for row in (cy - ry).max(0)..=(cy + ry).min(self.rows as i32 - 1) {
             for col in (cx - rx).max(0)..=(cx + rx).min(self.cols as i32 - 1) {
-                for &idx in &self.cells[row as usize * self.cols + col as usize] {
+                let cell = row as usize * self.cols + col as usize;
+                let start = self.cell_offsets[cell];
+                let end = self.cell_offsets[cell + 1];
+                for &idx in &self.cell_indices[start..end] {
                     let p = self.points[idx];
                     if !p.x.is_finite() || !p.y.is_finite() {
                         continue;

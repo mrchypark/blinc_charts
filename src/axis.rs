@@ -1,4 +1,4 @@
-use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
+use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextBaseline, TextStyle};
 
 use crate::scale::LinearScale;
 use crate::view::Domain1D;
@@ -89,7 +89,8 @@ pub fn draw_bottom_axis(
         Brush::Solid(axis_color),
     );
 
-    let style = TextStyle::new(10.0).with_color(text_color);
+    let mut style = TextStyle::new(10.0).with_color(text_color);
+    style.baseline = TextBaseline::Top;
     for t in ticks {
         let label_w = label_width_px(ctx, &t.label, &style);
         ctx.fill_rect(
@@ -97,11 +98,8 @@ pub fn draw_bottom_axis(
             0.0.into(),
             Brush::Solid(axis_color),
         );
-        ctx.draw_text(
-            &t.label,
-            Point::new((t.px - label_w * 0.5).max(plot_x), plot_y + 4.0),
-            &style,
-        );
+        let label_x = (t.px - label_w * 0.5).clamp(plot_x, (plot_x + plot_w - label_w).max(plot_x));
+        ctx.draw_text(&t.label, Point::new(label_x, plot_y + 6.0), &style);
     }
 }
 
@@ -124,7 +122,8 @@ pub fn draw_left_axis(
         Brush::Solid(axis_color),
     );
 
-    let style = TextStyle::new(10.0).with_color(text_color);
+    let mut style = TextStyle::new(10.0).with_color(text_color);
+    style.baseline = TextBaseline::Middle;
     for t in ticks {
         let label_w = label_width_px(ctx, &t.label, &style);
         ctx.fill_rect(
@@ -134,7 +133,7 @@ pub fn draw_left_axis(
         );
         ctx.draw_text(
             &t.label,
-            Point::new(plot_x - 6.0 - label_w, t.px - 6.0),
+            Point::new(plot_x - 6.0 - label_w, t.px.clamp(plot_y, plot_y + plot_h)),
             &style,
         );
     }
