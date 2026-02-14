@@ -17,7 +17,7 @@ pub fn format_time_or_number(value: f32) -> String {
         return format_compact(value);
     }
     let abs = value.abs();
-    if abs >= 86_400.0 {
+    if abs >= 60.0 {
         return format_hms(value as f64);
     }
     format_compact(value)
@@ -30,5 +30,11 @@ mod tests {
     #[test]
     fn hms_formats_expected() {
         assert_eq!(format_hms(3661.0), "01:01:01");
+    }
+
+    #[test]
+    fn time_or_number_uses_hms_for_minute_ranges() {
+        assert_eq!(format_time_or_number(61.0), "00:01:01");
+        assert_eq!(format_time_or_number(3661.0), "01:01:01");
     }
 }
