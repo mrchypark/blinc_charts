@@ -3,9 +3,16 @@ use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 use crate::scale::LinearScale;
 use crate::view::Domain1D;
 
-// DrawContext currently has no text-measurement API, so axis labels use a
-// stable width heuristic for approximate centering.
+// Fallback width used only when backend text measurement is unavailable.
 const AVG_LABEL_CHAR_WIDTH_PX: f32 = 6.0;
+
+fn label_width_px(ctx: &mut dyn DrawContext, label: &str, style: &TextStyle) -> f32 {
+    let measured = ctx
+        .measure_text(label, style)
+        .map(|size| size.width)
+        .unwrap_or(label.chars().count() as f32 * AVG_LABEL_CHAR_WIDTH_PX);
+    measured.clamp(10.0, 80.0)
+}
 
 #[derive(Clone, Debug)]
 pub struct AxisTick {
@@ -84,7 +91,7 @@ pub fn draw_bottom_axis(
 
     let style = TextStyle::new(10.0).with_color(text_color);
     for t in ticks {
-        let label_w = (t.label.chars().count() as f32 * AVG_LABEL_CHAR_WIDTH_PX).clamp(10.0, 80.0);
+        let label_w = label_width_px(ctx, &t.label, &style);
         ctx.fill_rect(
             Rect::new(t.px, plot_y, 1.0, 4.0),
             0.0.into(),
@@ -119,7 +126,7 @@ pub fn draw_left_axis(
 
     let style = TextStyle::new(10.0).with_color(text_color);
     for t in ticks {
-        let label_w = (t.label.chars().count() as f32 * AVG_LABEL_CHAR_WIDTH_PX).clamp(10.0, 80.0);
+        let label_w = label_width_px(ctx, &t.label, &style);
         ctx.fill_rect(
             Rect::new(plot_x - 4.0, t.px, 4.0, 1.0),
             0.0.into(),
