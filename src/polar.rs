@@ -119,6 +119,18 @@ impl PolarChartModel {
             return;
         }
 
+        if self.mode == PolarChartMode::Parallel {
+            let dims_n = self.dimensions.len().max(1);
+            let idx = if dims_n <= 1 {
+                0
+            } else {
+                let t = ((local_x - px) / pw).clamp(0.0, 1.0);
+                (t * (dims_n - 1) as f32).round() as usize
+            };
+            self.hover_dim = Some(idx.min(dims_n - 1));
+            return;
+        }
+
         // Hover: pick nearest dimension ray by angle around the center.
         let cx = px + pw * 0.5;
         let cy = py + ph * 0.5;
@@ -148,18 +160,63 @@ impl PolarChartModel {
         match self.mode {
             PolarChartMode::Radar => self.render_radar(ctx, px, py, pw, ph),
             PolarChartMode::Polar => self.render_radar(ctx, px, py, pw, ph),
-            PolarChartMode::Parallel => self.render_parallel_stub(ctx, px, py, pw, ph),
+            PolarChartMode::Parallel => self.render_parallel(ctx, px, py, pw, ph),
         }
     }
 
-    fn render_parallel_stub(&self, ctx: &mut dyn DrawContext, px: f32, py: f32, pw: f32, ph: f32) {
-        let style = TextStyle::new(12.0).with_color(self.style.text);
-        ctx.draw_text(
-            "parallel (uses radar v1)",
-            Point::new(px + 6.0, py + 6.0),
-            &style,
-        );
-        self.render_radar(ctx, px, py, pw, ph);
+    fn render_parallel(&self, ctx: &mut dyn DrawContext, px: f32, py: f32, pw: f32, ph: f32) {
+        let dims_n = self.dimensions.len().max(1);
+        let stroke = Stroke::new(1.0);
+        let inv = 1.0 / (self.style.max_value - self.style.min_value).max(1e-12);
+
+        let axis_x = |i: usize| -> f32 {
+            if dims_n <= 1 {
+                px + pw * 0.5
+            } else {
+                px + (i as f32 / (dims_n - 1) as f32) * pw
+            }
+        };
+
+        // Vertical axes and labels.
+        for i in 0..dims_n {
+            let x = axis_x(i);
+            let axis_color = if self.hover_dim == Some(i) {
+                Color::rgba(1.0, 1.0, 1.0, 0.30)
+            } else {
+                self.style.grid
+            };
+            ctx.stroke_polyline(
+                &[Point::new(x, py), Point::new(x, py + ph)],
+                &stroke,
+                Brush::Solid(axis_color),
+            );
+            if let Some(lbl) = self.dimensions.get(i) {
+                let style = TextStyle::new(11.0).with_color(self.style.text);
+                ctx.draw_text(lbl, Point::new(x + 3.0, py + 2.0), &style);
+            }
+        }
+
+        // Series lines.
+        let max_series = self.series.len().min(self.style.max_series);
+        for s in 0..max_series {
+            let vals = &self.series[s];
+            let mut pts = Vec::with_capacity(dims_n);
+            for i in 0..dims_n {
+                let v = vals.get(i).copied().unwrap_or(self.style.min_value);
+                let v = if v.is_finite() {
+                    v
+                } else {
+                    self.style.min_value
+                };
+                let t = ((v - self.style.min_value) * inv).clamp(0.0, 1.0);
+                let x = axis_x(i);
+                let y = py + (1.0 - t) * ph;
+                pts.push(Point::new(x, y));
+            }
+            if pts.len() >= 2 {
+                ctx.stroke_polyline(&pts, &Stroke::new(1.75), Brush::Solid(self.series_color(s)));
+            }
+        }
     }
 
     fn render_radar(&self, ctx: &mut dyn DrawContext, px: f32, py: f32, pw: f32, ph: f32) {
@@ -295,4 +352,37 @@ pub fn polar_chart(handle: PolarChartHandle) -> impl ElementBuilder {
             .h_full()
             .foreground(),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blinc_core::{DrawCommand, RecordingContext, Size};
+
+    #[test]
+    fn parallel_mode_does_not_render_stub_label() {
+        let mut model = PolarChartModel::new_radar(
+            vec!["A".into(), "B".into(), "C".into()],
+            vec![vec![0.2, 0.5, 0.9]],
+        )
+        .unwrap();
+        model.mode = PolarChartMode::Parallel;
+
+        let mut ctx = RecordingContext::new(Size::new(320.0, 220.0));
+        model.render_plot(&mut ctx, 320.0, 220.0);
+
+        let labels: Vec<&str> = ctx
+            .commands()
+            .iter()
+            .filter_map(|cmd| match cmd {
+                DrawCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            !labels.contains(&"parallel (uses radar v1)"),
+            "parallel mode must not render the old stub label"
+        );
+    }
 }

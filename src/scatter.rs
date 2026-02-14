@@ -3,11 +3,16 @@ use std::sync::{Arc, Mutex};
 use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 use blinc_layout::ElementBuilder;
 
+use crate::axis::{build_bottom_ticks, build_left_ticks, draw_bottom_axis, draw_left_axis};
 use crate::brush::BrushX;
 use crate::common::{draw_grid, fill_bg};
+use crate::format::format_compact;
 use crate::link::ChartLinkHandle;
 use crate::lod::{downsample_min_max, DownsampleParams};
+use crate::spatial_index::SpatialIndex;
+use crate::time_format::format_time_or_number;
 use crate::time_series::TimeSeriesF32;
+use crate::triangulation::triangulate_fan;
 use crate::view::{ChartView, Domain1D, Domain2D};
 use crate::xy_stack::InteractiveXChartModel;
 
@@ -41,6 +46,7 @@ pub struct ScatterChartStyle {
     pub scroll_zoom_factor: f32,
     pub pinch_zoom_min: f32,
     pub max_points: usize,
+    pub hover_hit_radius_px: f32,
 }
 
 impl Default for ScatterChartStyle {
@@ -57,6 +63,7 @@ impl Default for ScatterChartStyle {
             // Each point is currently rendered as a separate GPU primitive.
             // Keep this below the default renderer primitive budget.
             max_points: 8_000,
+            hover_hit_radius_px: 14.0,
         }
     }
 }
@@ -74,6 +81,8 @@ pub struct ScatterChartModel {
     downsample_params: DownsampleParams,
     user_max_points: usize,
     last_sample_key: Option<SampleKey>,
+    spatial_index: Option<SpatialIndex>,
+    mesh_triangle_count: usize,
 
     last_drag_total_x: Option<f32>,
     brush_x: BrushX,
@@ -104,6 +113,8 @@ impl ScatterChartModel {
             downsample_params: DownsampleParams::default(),
             user_max_points: DownsampleParams::default().max_points,
             last_sample_key: None,
+            spatial_index: None,
+            mesh_triangle_count: 0,
             last_drag_total_x: None,
             brush_x: BrushX::default(),
         }
@@ -129,12 +140,22 @@ impl ScatterChartModel {
             self.hover_point = None;
             return;
         }
+        self.ensure_samples(w, h);
         self.crosshair_x = Some(local_x);
-        let x = self.view.px_to_x(local_x, px, pw);
+
         self.hover_point = self
-            .series
-            .nearest_by_x(x)
-            .map(|(_i, xx, yy)| Point::new(xx, yy));
+            .spatial_index
+            .as_ref()
+            .and_then(|idx| idx.nearest(local_x, local_y, self.style.hover_hit_radius_px))
+            .and_then(|(i, _)| self.downsampled.get(i).copied());
+
+        if self.hover_point.is_none() {
+            let x = self.view.px_to_x(local_x, px, pw);
+            self.hover_point = self
+                .series
+                .nearest_by_x(x)
+                .map(|(_i, xx, yy)| Point::new(xx, yy));
+        }
     }
 
     pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
@@ -253,6 +274,9 @@ impl ScatterChartModel {
             let pp = self.view.data_to_px(*p, px, py, pw, ph);
             self.points_px.push(pp);
         }
+        self.spatial_index = Some(SpatialIndex::build(&self.points_px, 24, 24));
+        let mesh_n = self.downsampled.len().min(512);
+        self.mesh_triangle_count = triangulate_fan(&self.downsampled[..mesh_n]).len();
 
         self.last_sample_key = Some(key);
     }
@@ -306,8 +330,26 @@ impl ScatterChartModel {
             );
         }
 
+        let x_ticks = build_bottom_ticks(self.view.domain.x, px, pw, 5, format_time_or_number);
+        draw_bottom_axis(
+            ctx,
+            &x_ticks,
+            px,
+            py + ph,
+            pw,
+            self.style.grid,
+            self.style.text,
+        );
+        let y_ticks = build_left_ticks(self.view.domain.y, py, ph, 5, format_compact);
+        draw_left_axis(ctx, &y_ticks, px, py, ph, self.style.grid, self.style.text);
+
         if let Some(p) = self.hover_point {
-            let text = format!("x={:.3}  y={:.3}", p.x, p.y);
+            let text = format!(
+                "x={}  y={}  tri={}",
+                format_time_or_number(p.x),
+                format_compact(p.y),
+                self.mesh_triangle_count
+            );
             let style = TextStyle::new(12.0).with_color(self.style.text);
             ctx.draw_text(&text, Point::new(px + 6.0, py + 6.0), &style);
         }

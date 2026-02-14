@@ -7,6 +7,7 @@ use blinc_layout::ElementBuilder;
 
 use crate::brush::BrushRect;
 use crate::common::{draw_grid, fill_bg};
+use crate::polygon::{point_in_polygon, polygon_area, rect_polygon};
 use crate::view::{ChartView, Domain1D, Domain2D};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -405,9 +406,18 @@ impl DensityMapChartModel {
         }
 
         if let Some((a, b)) = self.selection {
+            let poly = rect_polygon(a.x, a.y, b.x, b.y);
+            let area = polygon_area(&poly);
+            let contains_hover = self
+                .hover_point
+                .map(|p| point_in_polygon(p, &poly))
+                .unwrap_or(false);
             let style = TextStyle::new(12.0).with_color(self.style.text);
             ctx.draw_text(
-                &format!("sel: ({:.2},{:.2})..({:.2},{:.2})", a.x, a.y, b.x, b.y),
+                &format!(
+                    "sel: ({:.2},{:.2})..({:.2},{:.2})  area={:.2}  hover_in={contains_hover}",
+                    a.x, a.y, b.x, b.y, area
+                ),
                 Point::new(px + 6.0, py + 24.0),
                 &style,
             );

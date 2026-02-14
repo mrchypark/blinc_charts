@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use blinc_core::{Brush, Color, DrawContext, Path, Point, Stroke, TextStyle};
 use blinc_layout::canvas::canvas;
@@ -6,6 +7,9 @@ use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::common::fill_bg;
+use crate::format::format_compact;
+use crate::interpolate::lerp_f32;
+use crate::transition::ValueTransition;
 
 #[derive(Clone, Debug)]
 pub struct GaugeChartStyle {
@@ -41,6 +45,8 @@ pub struct GaugeChartModel {
     pub max: f32,
     pub value: f32,
     pub style: GaugeChartStyle,
+    pub transition: Option<ValueTransition>,
+    pub transition_step_sec: f32,
 }
 
 impl GaugeChartModel {
@@ -53,11 +59,28 @@ impl GaugeChartModel {
             max,
             value,
             style: GaugeChartStyle::default(),
+            transition: None,
+            transition_step_sec: 1.0 / 60.0,
         })
     }
 
     pub fn set_value(&mut self, value: f32) {
         self.value = value.clamp(self.min, self.max);
+        self.transition = None;
+    }
+
+    pub fn set_value_transition(&mut self, value: f32, duration_seconds: f32) {
+        let target = value.clamp(self.min, self.max);
+        self.transition = Some(ValueTransition::new(self.value, target, duration_seconds));
+    }
+
+    pub fn tick_transition(&mut self, dt_seconds: f32) {
+        let Some(mut tr) = self.transition else {
+            return;
+        };
+        tr.step(dt_seconds);
+        self.value = tr.value().clamp(self.min, self.max);
+        self.transition = if tr.is_finished() { None } else { Some(tr) };
     }
 
     fn t(&self) -> f32 {
@@ -76,7 +99,7 @@ impl GaugeChartModel {
         out
     }
 
-    pub fn render_plot(&self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
+    pub fn render_plot(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
         fill_bg(ctx, w, h, self.style.bg);
 
         let cx = w * 0.5;
@@ -86,7 +109,7 @@ impl GaugeChartModel {
         let a0 = self.style.angle_start_rad;
         let a1 = self.style.angle_end_rad;
         let t = self.t();
-        let av = a0 + (a1 - a0) * t;
+        let av = lerp_f32(a0, a1, t);
 
         let n = ((r * 0.35) as usize).clamp(16, 96);
         let track_pts = Self::arc_points(cx, cy, r, a0, a1, n);
@@ -122,7 +145,7 @@ impl GaugeChartModel {
             Brush::Solid(Color::rgba(1.0, 1.0, 1.0, 0.18)),
         );
 
-        let label = format!("{:.1}", self.value);
+        let label = format_compact(self.value);
         let style = TextStyle::new(22.0).with_color(self.style.text);
         ctx.draw_text(&label, Point::new(cx - 22.0, cy + r * 0.42), &style);
 
@@ -151,10 +174,26 @@ impl GaugeChartHandle {
 
 pub fn gauge_chart(handle: GaugeChartHandle) -> impl ElementBuilder {
     let model_plot = handle.0.clone();
+    let last_tick = Arc::new(Mutex::new(None::<Instant>));
+    let last_tick_plot = last_tick.clone();
     stack().w_full().h_full().overflow_clip().child(
         canvas(move |ctx, bounds| {
-            if let Ok(m) = model_plot.lock() {
+            if let Ok(mut m) = model_plot.lock() {
+                let now = Instant::now();
+                let dt = if let Ok(mut last) = last_tick_plot.lock() {
+                    let dt = last
+                        .map(|prev| (now - prev).as_secs_f32())
+                        .unwrap_or(m.transition_step_sec);
+                    *last = Some(now);
+                    dt
+                } else {
+                    m.transition_step_sec
+                };
+                m.tick_transition(dt.clamp(1.0 / 240.0, 0.25));
                 m.render_plot(ctx, bounds.width, bounds.height);
+                if m.transition.is_some() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .w_full()
@@ -289,4 +328,21 @@ pub fn funnel_chart(handle: FunnelChartHandle) -> impl ElementBuilder {
         .w_full()
         .h_full(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gauge_transition_reaches_target_value() {
+        let mut m = GaugeChartModel::new(0.0, 100.0, 10.0).unwrap();
+        m.set_value_transition(90.0, 0.5);
+
+        for _ in 0..30 {
+            m.tick_transition(1.0 / 60.0);
+        }
+        assert!((m.value - 90.0).abs() < 1e-3);
+        assert!(m.transition.is_none());
+    }
 }

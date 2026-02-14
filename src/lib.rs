@@ -7,13 +7,22 @@
 //! - Use Blinc's built-in event routing (mouse/touch/scroll/pinch/drag)
 //! - Prioritize performance for large datasets via sampling/LOD and GPU pipelines
 
+pub mod axis;
 mod brush;
 mod common;
+pub mod format;
 pub mod input;
+pub mod interpolate;
 mod link;
 mod lod;
+pub mod polygon;
+pub mod scale;
 mod segments;
+pub mod spatial_index;
+pub mod time_format;
 mod time_series;
+pub mod transition;
+pub mod triangulation;
 mod view;
 mod xy_stack;
 

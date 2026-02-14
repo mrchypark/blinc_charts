@@ -6,6 +6,7 @@ use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::common::{draw_grid, fill_bg};
+use crate::spatial_index::SpatialIndex;
 use crate::view::{ChartView, Domain1D, Domain2D};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -53,6 +54,35 @@ struct GraphLayout {
     node_pos: Vec<Point>, // data coords
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GraphHoverCacheKey {
+    domain_x_min: u32,
+    domain_x_max: u32,
+    domain_y_min: u32,
+    domain_y_max: u32,
+    plot_x: u32,
+    plot_y: u32,
+    plot_w: u32,
+    plot_h: u32,
+    max_nodes: usize,
+}
+
+impl GraphHoverCacheKey {
+    fn new(view: &ChartView, px: f32, py: f32, pw: f32, ph: f32, max_nodes: usize) -> Self {
+        Self {
+            domain_x_min: view.domain.x.min.to_bits(),
+            domain_x_max: view.domain.x.max.to_bits(),
+            domain_y_min: view.domain.y.min.to_bits(),
+            domain_y_max: view.domain.y.max.to_bits(),
+            plot_x: px.to_bits(),
+            plot_y: py.to_bits(),
+            plot_w: pw.to_bits(),
+            plot_h: ph.to_bits(),
+            max_nodes,
+        }
+    }
+}
+
 pub struct NetworkChartModel {
     pub mode: NetworkMode,
     pub labels: Vec<String>,
@@ -68,6 +98,9 @@ pub struct NetworkChartModel {
     pub hover_node: Option<usize>,
 
     layout: GraphLayout,
+    graph_hover_points_px: Vec<Point>,
+    graph_hover_index: Option<SpatialIndex>,
+    graph_hover_cache_key: Option<GraphHoverCacheKey>,
     last_drag_total_x: Option<f32>,
     last_drag_total_y: Option<f32>,
 }
@@ -132,6 +165,9 @@ impl NetworkChartModel {
             layout: GraphLayout {
                 node_pos: Self::circle_layout(64, 1.0),
             },
+            graph_hover_points_px: Vec::new(),
+            graph_hover_index: None,
+            graph_hover_cache_key: None,
             last_drag_total_x: None,
             last_drag_total_y: None,
         })
@@ -164,6 +200,9 @@ impl NetworkChartModel {
             layout: GraphLayout {
                 node_pos: Self::circle_layout(n.min(512), 1.0),
             },
+            graph_hover_points_px: Vec::new(),
+            graph_hover_index: None,
+            graph_hover_cache_key: None,
             last_drag_total_x: None,
             last_drag_total_y: None,
         })
@@ -184,6 +223,32 @@ impl NetworkChartModel {
         self.view.plot_rect(w, h)
     }
 
+    fn ensure_graph_hover_cache(&mut self, px: f32, py: f32, pw: f32, ph: f32, max_n: usize) {
+        let key = GraphHoverCacheKey::new(&self.view, px, py, pw, ph, max_n);
+        if self.graph_hover_cache_key == Some(key) {
+            return;
+        }
+
+        self.graph_hover_points_px.clear();
+        self.graph_hover_points_px.reserve(max_n);
+        for i in 0..max_n {
+            self.graph_hover_points_px.push(self.view.data_to_px(
+                self.layout.node_pos[i],
+                px,
+                py,
+                pw,
+                ph,
+            ));
+        }
+
+        self.graph_hover_index = if max_n >= 48 {
+            Some(SpatialIndex::build(&self.graph_hover_points_px, 16, 16))
+        } else {
+            None
+        };
+        self.graph_hover_cache_key = Some(key);
+    }
+
     pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
@@ -198,24 +263,31 @@ impl NetworkChartModel {
         let hit_r = (self.style.node_radius * 1.6).max(8.0);
         match self.mode {
             NetworkMode::Graph => {
-                // Find nearest node in screen space (capped).
-                let mut best = None::<(usize, f32)>;
                 let max_n = self
                     .labels
                     .len()
                     .min(self.style.max_nodes)
                     .min(self.layout.node_pos.len());
-                for i in 0..max_n {
-                    let p = self.layout.node_pos[i];
-                    let sp = self.view.data_to_px(p, px, py, pw, ph);
-                    let dx = sp.x - local_x;
-                    let dy = sp.y - local_y;
-                    let d2 = dx * dx + dy * dy;
-                    if best.map(|b| d2 < b.1).unwrap_or(true) {
-                        best = Some((i, d2));
-                    }
+                if max_n == 0 {
+                    self.hover_node = None;
+                    return;
                 }
-                self.hover_node = best.filter(|(_i, d2)| *d2 <= hit_r * hit_r).map(|(i, _)| i);
+                self.ensure_graph_hover_cache(px, py, pw, ph, max_n);
+
+                if let Some(index) = self.graph_hover_index.as_ref() {
+                    self.hover_node = index.nearest(local_x, local_y, hit_r).map(|(i, _)| i);
+                } else {
+                    let mut best = None::<(usize, f32)>;
+                    for (i, sp) in self.graph_hover_points_px.iter().enumerate() {
+                        let dx = sp.x - local_x;
+                        let dy = sp.y - local_y;
+                        let d2 = dx * dx + dy * dy;
+                        if best.map(|b| d2 < b.1).unwrap_or(true) {
+                            best = Some((i, d2));
+                        }
+                    }
+                    self.hover_node = best.filter(|(_i, d2)| *d2 <= hit_r * hit_r).map(|(i, _)| i);
+                }
             }
             NetworkMode::Sankey => {
                 // Match the render_sankey node layout exactly.
@@ -669,5 +741,30 @@ mod tests {
         }));
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn graph_hover_remains_correct_across_repeated_moves_and_zoom() {
+        let nodes: Vec<String> = (0..128).map(|i| format!("n{i}")).collect();
+        let mut model = NetworkChartModel::new_graph(nodes, vec![]).unwrap();
+        model.style.max_nodes = 128;
+
+        let (px, py, pw, ph) = model.plot_rect(360.0, 240.0);
+        let p0 = model
+            .view
+            .data_to_px(model.layout.node_pos[0], px, py, pw, ph);
+        model.on_mouse_move(p0.x, p0.y, 360.0, 240.0);
+        assert_eq!(model.hover_node, Some(0));
+
+        model.on_mouse_move(p0.x, p0.y, 360.0, 240.0);
+        assert_eq!(model.hover_node, Some(0));
+
+        model.on_scroll(-80.0, p0.x, p0.y, 360.0, 240.0);
+        let (px2, py2, pw2, ph2) = model.plot_rect(360.0, 240.0);
+        let p0_after_zoom = model
+            .view
+            .data_to_px(model.layout.node_pos[0], px2, py2, pw2, ph2);
+        model.on_mouse_move(p0_after_zoom.x, p0_after_zoom.y, 360.0, 240.0);
+        assert_eq!(model.hover_node, Some(0));
     }
 }

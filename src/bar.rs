@@ -3,9 +3,12 @@ use std::sync::{Arc, Mutex};
 use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 use blinc_layout::ElementBuilder;
 
+use crate::axis::{build_bottom_ticks, build_left_ticks, draw_bottom_axis, draw_left_axis};
 use crate::brush::BrushX;
 use crate::common::{draw_grid, fill_bg};
+use crate::format::format_compact;
 use crate::link::ChartLinkHandle;
+use crate::time_format::format_time_or_number;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
 use crate::xy_stack::InteractiveXChartModel;
@@ -423,8 +426,21 @@ impl BarChartModel {
             );
         }
 
+        let x_ticks = build_bottom_ticks(self.view.domain.x, px, pw, 5, format_time_or_number);
+        draw_bottom_axis(
+            ctx,
+            &x_ticks,
+            px,
+            py + ph,
+            pw,
+            self.style.grid,
+            self.style.text,
+        );
+        let y_ticks = build_left_ticks(self.view.domain.y, py, ph, 5, format_compact);
+        draw_left_axis(ctx, &y_ticks, px, py, ph, self.style.grid, self.style.text);
+
         if let Some(x) = self.hover_x {
-            let text = format!("x={:.3}", x);
+            let text = format!("x={}", format_time_or_number(x));
             let style = TextStyle::new(12.0).with_color(self.style.text);
             ctx.draw_text(&text, Point::new(px + 6.0, py + 6.0), &style);
         }

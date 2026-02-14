@@ -1,3 +1,4 @@
+use crate::scale::LinearScale;
 use blinc_core::Point;
 
 /// 1D numeric domain (min..max).
@@ -90,24 +91,46 @@ impl ChartView {
     }
 
     pub fn x_to_px(&self, x: f32, plot_x: f32, plot_w: f32) -> f32 {
-        let t = (x - self.domain.x.min) / self.domain.x.span();
-        plot_x + t * plot_w
+        LinearScale::new(
+            self.domain.x.min,
+            self.domain.x.max,
+            plot_x,
+            plot_x + plot_w,
+        )
+        .map(x)
     }
 
     pub fn y_to_px(&self, y: f32, plot_y: f32, plot_h: f32) -> f32 {
         // y increases downward in screen coords.
-        let t = (y - self.domain.y.min) / self.domain.y.span();
-        plot_y + (1.0 - t) * plot_h
+        LinearScale::new(
+            self.domain.y.min,
+            self.domain.y.max,
+            plot_y + plot_h,
+            plot_y,
+        )
+        .map(y)
     }
 
     pub fn px_to_x(&self, px: f32, plot_x: f32, plot_w: f32) -> f32 {
-        let t = ((px - plot_x) / plot_w).clamp(0.0, 1.0);
-        self.domain.x.min + t * self.domain.x.span()
+        let px = px.clamp(plot_x, plot_x + plot_w);
+        LinearScale::new(
+            self.domain.x.min,
+            self.domain.x.max,
+            plot_x,
+            plot_x + plot_w,
+        )
+        .invert(px)
     }
 
     pub fn px_to_y(&self, py: f32, plot_y: f32, plot_h: f32) -> f32 {
-        let t = ((py - plot_y) / plot_h).clamp(0.0, 1.0);
-        self.domain.y.min + (1.0 - t) * self.domain.y.span()
+        let py = py.clamp(plot_y, plot_y + plot_h);
+        LinearScale::new(
+            self.domain.y.min,
+            self.domain.y.max,
+            plot_y + plot_h,
+            plot_y,
+        )
+        .invert(py)
     }
 
     pub fn data_to_px(
