@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use blinc_core::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
@@ -6,6 +7,7 @@ use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::common::{draw_grid, fill_bg};
+use crate::palette;
 use crate::spatial_index::SpatialIndex;
 use crate::view::{ChartView, Domain1D, Domain2D};
 
@@ -52,6 +54,12 @@ impl Default for NetworkChartStyle {
 #[derive(Clone, Debug)]
 struct GraphLayout {
     node_pos: Vec<Point>, // data coords
+}
+
+#[derive(Clone, Debug, Default)]
+struct SankeyLayout {
+    node_rects: Vec<Rect>,
+    link_paths: Vec<(Path, f32, f32)>, // (path, thickness, alpha)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -290,28 +298,28 @@ impl NetworkChartModel {
                 }
             }
             NetworkMode::Sankey => {
-                // Match the render_sankey node layout exactly.
-                let n = self.labels.len().min(self.style.max_nodes);
-                if n == 0 {
+                let layout = self.build_sankey_layout(px, py, pw, ph);
+                if layout.node_rects.is_empty() {
                     self.hover_node = None;
                     return;
                 }
-                let cols = 3usize;
-                let col_w = pw / cols as f32;
-                let row_h = (ph / ((n as f32 / cols as f32).ceil().max(1.0))).max(24.0);
+
+                let cursor = Point::new(local_x, local_y);
+                if let Some((i, _)) = layout
+                    .node_rects
+                    .iter()
+                    .enumerate()
+                    .find(|(_, r)| r.contains(cursor))
+                {
+                    self.hover_node = Some(i);
+                    return;
+                }
 
                 let mut best = None::<(usize, f32)>;
-                for i in 0..n {
-                    let col = i % cols;
-                    let row = i / cols;
-                    let x = px + col as f32 * col_w + col_w * 0.15;
-                    let y = py + row as f32 * row_h + row_h * 0.15;
-                    let rw = col_w * 0.70;
-                    let rh = row_h * 0.70;
-                    let cx = x + rw * 0.5;
-                    let cy = y + rh * 0.5;
-                    let dx = cx - local_x;
-                    let dy = cy - local_y;
+                for (i, r) in layout.node_rects.iter().enumerate() {
+                    let c = r.center();
+                    let dx = c.x - local_x;
+                    let dy = c.y - local_y;
                     let d2 = dx * dx + dy * dy;
                     if best.map(|b| d2 < b.1).unwrap_or(true) {
                         best = Some((i, d2));
@@ -474,52 +482,26 @@ impl NetworkChartModel {
     }
 
     fn render_sankey(&self, ctx: &mut dyn DrawContext, px: f32, py: f32, pw: f32, ph: f32) {
-        // Deterministic, simple sankey: place nodes by index in 3 columns.
-        let n = self.labels.len().min(self.style.max_nodes);
-        if n == 0 {
+        let layout = self.build_sankey_layout(px, py, pw, ph);
+        if layout.node_rects.is_empty() {
             return;
-        }
-        let cols = 3usize;
-        let col_w = pw / cols as f32;
-        let row_h = (ph / ((n as f32 / cols as f32).ceil().max(1.0))).max(24.0);
-
-        let mut node_rects = Vec::with_capacity(n);
-        for i in 0..n {
-            let col = i % cols;
-            let row = i / cols;
-            let x = px + col as f32 * col_w + col_w * 0.15;
-            let y = py + row as f32 * row_h + row_h * 0.15;
-            let rw = col_w * 0.70;
-            let rh = row_h * 0.70;
-            node_rects.push(Rect::new(x, y, rw.max(6.0), rh.max(6.0)));
         }
 
         let stroke = Stroke::new(1.0);
-        for &(a, b, wv) in self.links.iter().take(self.style.max_links) {
-            if a >= n || b >= n {
-                continue;
-            }
-            let ra = node_rects[a];
-            let rb = node_rects[b];
-            let p0 = Point::new(ra.x() + ra.width(), ra.y() + ra.height() * 0.5);
-            let p1 = Point::new(rb.x(), rb.y() + rb.height() * 0.5);
-            let mx = (p0.x + p1.x) * 0.5;
-            let path = Path::new()
-                .move_to(p0.x, p0.y)
-                .cubic_to(mx, p0.y, mx, p1.y, p1.x, p1.y);
-            let alpha = (wv / 10.0).clamp(0.10, 0.55);
+        for (path, thickness, alpha) in layout.link_paths {
             ctx.stroke_path(
                 &path,
-                &Stroke::new(2.0),
+                &Stroke::new(thickness),
                 Brush::Solid(Color::rgba(0.85, 0.92, 1.0, alpha)),
             );
         }
 
-        for (i, r) in node_rects.iter().enumerate() {
+        for (i, r) in layout.node_rects.iter().enumerate() {
+            let c = self.leaf_color(i);
             ctx.fill_rect(
                 *r,
                 8.0.into(),
-                Brush::Solid(Color::rgba(0.35, 0.65, 1.0, 0.35)),
+                Brush::Solid(Color::rgba(c.r, c.g, c.b, 0.35)),
             );
             ctx.stroke_rect(
                 *r,
@@ -535,6 +517,247 @@ impl NetworkChartModel {
                     &style,
                 );
             }
+        }
+    }
+
+    fn build_sankey_layout(&self, px: f32, py: f32, pw: f32, ph: f32) -> SankeyLayout {
+        let n = self.labels.len().min(self.style.max_nodes);
+        if n == 0 || pw <= 0.0 || ph <= 0.0 {
+            return SankeyLayout::default();
+        }
+
+        let mut links = Vec::new();
+        let mut in_flow = vec![0.0f32; n];
+        let mut out_flow = vec![0.0f32; n];
+        for &(a, b, w) in self.links.iter().take(self.style.max_links) {
+            if a >= n || b >= n || !w.is_finite() || w <= 0.0 {
+                continue;
+            }
+            links.push((a, b, w));
+            out_flow[a] += w;
+            in_flow[b] += w;
+        }
+
+        let mut layer = vec![0usize; n];
+        let mut indegree = vec![0usize; n];
+        let mut adj = vec![Vec::<usize>::new(); n];
+        for &(a, b, _) in &links {
+            indegree[b] += 1;
+            adj[a].push(b);
+        }
+
+        let mut q = VecDeque::new();
+        for (i, &deg) in indegree.iter().enumerate() {
+            if deg == 0 {
+                q.push_back(i);
+            }
+        }
+        let mut visited = 0usize;
+        while let Some(u) = q.pop_front() {
+            visited += 1;
+            for &v in &adj[u] {
+                layer[v] = layer[v].max(layer[u] + 1);
+                indegree[v] -= 1;
+                if indegree[v] == 0 {
+                    q.push_back(v);
+                }
+            }
+        }
+        if visited < n {
+            let fallback_layers = 3usize.min(n.max(1));
+            for i in 0..n {
+                if indegree[i] > 0 {
+                    layer[i] = i % fallback_layers;
+                }
+            }
+        }
+
+        let mut max_layer = *layer.iter().max().unwrap_or(&0);
+        if max_layer == 0 && n > 1 {
+            for i in 0..n {
+                if in_flow[i] == 0.0 && out_flow[i] > 0.0 {
+                    layer[i] = 0;
+                } else if in_flow[i] > 0.0 && out_flow[i] == 0.0 {
+                    layer[i] = 2;
+                } else {
+                    layer[i] = 1;
+                }
+            }
+            max_layer = *layer.iter().max().unwrap_or(&0);
+        }
+        for i in 0..n {
+            if in_flow[i] > 0.0 && out_flow[i] == 0.0 {
+                layer[i] = max_layer.max(1);
+            }
+        }
+        max_layer = *layer.iter().max().unwrap_or(&0);
+
+        let mut layer_nodes = vec![Vec::<usize>::new(); max_layer + 1];
+        for i in 0..n {
+            layer_nodes[layer[i]].push(i);
+        }
+        // Initialize with stable order by flow, then refine with barycentric sweeps.
+        for nodes in &mut layer_nodes {
+            nodes.sort_by(|a, b| {
+                let fa = in_flow[*a] + out_flow[*a];
+                let fb = in_flow[*b] + out_flow[*b];
+                fb.partial_cmp(&fa)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.cmp(b))
+            });
+        }
+        let mut layer_pos = vec![0usize; n];
+        for nodes in &layer_nodes {
+            for (i, &node) in nodes.iter().enumerate() {
+                layer_pos[node] = i;
+            }
+        }
+
+        for _ in 0..4 {
+            // Left -> right sweep using incoming neighbors.
+            for li in 1..=max_layer {
+                let mut scored = Vec::with_capacity(layer_nodes[li].len());
+                for &node in &layer_nodes[li] {
+                    let mut sum = 0.0f32;
+                    let mut cnt = 0usize;
+                    for &(a, b, _w) in &links {
+                        if b == node && layer[a] + 1 == li {
+                            sum += layer_pos[a] as f32;
+                            cnt += 1;
+                        }
+                    }
+                    let bary = if cnt > 0 {
+                        sum / cnt as f32
+                    } else {
+                        layer_pos[node] as f32
+                    };
+                    scored.push((node, bary, layer_pos[node]));
+                }
+                scored.sort_by(|a, b| {
+                    a.1.partial_cmp(&b.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| a.2.cmp(&b.2))
+                });
+                layer_nodes[li] = scored.into_iter().map(|s| s.0).collect();
+                for (i, &node) in layer_nodes[li].iter().enumerate() {
+                    layer_pos[node] = i;
+                }
+            }
+
+            // Right -> left sweep using outgoing neighbors.
+            if max_layer > 0 {
+                for li in (0..max_layer).rev() {
+                    let mut scored = Vec::with_capacity(layer_nodes[li].len());
+                    for &node in &layer_nodes[li] {
+                        let mut sum = 0.0f32;
+                        let mut cnt = 0usize;
+                        for &(a, b, _w) in &links {
+                            if a == node && layer[b] == li + 1 {
+                                sum += layer_pos[b] as f32;
+                                cnt += 1;
+                            }
+                        }
+                        let bary = if cnt > 0 {
+                            sum / cnt as f32
+                        } else {
+                            layer_pos[node] as f32
+                        };
+                        scored.push((node, bary, layer_pos[node]));
+                    }
+                    scored.sort_by(|a, b| {
+                        a.1.partial_cmp(&b.1)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                            .then_with(|| a.2.cmp(&b.2))
+                    });
+                    layer_nodes[li] = scored.into_iter().map(|s| s.0).collect();
+                    for (i, &node) in layer_nodes[li].iter().enumerate() {
+                        layer_pos[node] = i;
+                    }
+                }
+            }
+        }
+
+        let layer_count = max_layer + 1;
+        let node_w = (pw / (layer_count as f32 * 8.0)).clamp(10.0, 24.0);
+        let x_step = if layer_count > 1 {
+            (pw - node_w).max(0.0) / (layer_count - 1) as f32
+        } else {
+            0.0
+        };
+
+        let mut node_rects = vec![Rect::ZERO; n];
+        for (li, nodes) in layer_nodes.iter().enumerate() {
+            let m = nodes.len();
+            if m == 0 {
+                continue;
+            }
+            let gap = (ph * 0.03).clamp(6.0, 18.0);
+            let total_gap = gap * (m as f32 + 1.0);
+            let usable_h = (ph - total_gap).max(8.0 * m as f32);
+            let min_h = 8.0f32;
+            let base_h = min_h * m as f32;
+            let extra_h = (usable_h - base_h).max(0.0);
+
+            let layer_flow: f32 = nodes
+                .iter()
+                .map(|&idx| in_flow[idx].max(out_flow[idx]).max(1.0))
+                .sum();
+
+            let x = px + li as f32 * x_step;
+            let mut y = py + gap;
+            for &idx in nodes {
+                let f = in_flow[idx].max(out_flow[idx]).max(1.0);
+                let extra = if layer_flow > 0.0 {
+                    extra_h * (f / layer_flow)
+                } else {
+                    extra_h / m as f32
+                };
+                let h = min_h + extra;
+                node_rects[idx] = Rect::new(x, y, node_w, h.max(min_h));
+                y += h + gap;
+            }
+        }
+
+        links.sort_by_key(|(a, b, _)| (layer[*a], *a, *b));
+        let mut src_offsets = vec![0.0f32; n];
+        let mut dst_offsets = vec![0.0f32; n];
+        let mut link_paths = Vec::with_capacity(links.len());
+
+        for &(a, b, w) in &links {
+            let ra = node_rects[a];
+            let rb = node_rects[b];
+            if ra.width() <= 0.0 || ra.height() <= 0.0 || rb.width() <= 0.0 || rb.height() <= 0.0 {
+                continue;
+            }
+
+            let src_scale = ra.height() / out_flow[a].max(1e-6);
+            let dst_scale = rb.height() / in_flow[b].max(1e-6);
+            let mut thickness = (w * src_scale.min(dst_scale)).clamp(1.0, 24.0);
+            let rem_src = (ra.height() - src_offsets[a]).max(1.0);
+            let rem_dst = (rb.height() - dst_offsets[b]).max(1.0);
+            thickness = thickness.min(rem_src).min(rem_dst).max(1.0);
+
+            let y0 = ra.y() + src_offsets[a] + thickness * 0.5;
+            let y1 = rb.y() + dst_offsets[b] + thickness * 0.5;
+            src_offsets[a] += thickness;
+            dst_offsets[b] += thickness;
+
+            let x0 = ra.x() + ra.width();
+            let x1 = rb.x();
+            let dx = (x1 - x0).abs() * 0.5;
+            let c0x = if x1 >= x0 { x0 + dx } else { x0 - dx };
+            let c1x = if x1 >= x0 { x1 - dx } else { x1 + dx };
+            let path = Path::new()
+                .move_to(x0, y0)
+                .cubic_to(c0x, y0, c1x, y1, x1, y1);
+
+            let alpha = (0.10 + thickness / 26.0).clamp(0.10, 0.62);
+            link_paths.push((path, thickness, alpha));
+        }
+
+        SankeyLayout {
+            node_rects,
+            link_paths,
         }
     }
 
@@ -584,16 +807,7 @@ impl NetworkChartModel {
     }
 
     fn leaf_color(&self, i: usize) -> Color {
-        let hues = [
-            (0.35, 0.65, 1.0),
-            (0.95, 0.55, 0.35),
-            (0.40, 0.85, 0.55),
-            (0.90, 0.75, 0.25),
-            (0.75, 0.55, 0.95),
-            (0.25, 0.80, 0.85),
-        ];
-        let (r, g, b) = hues[i % hues.len()];
-        Color::rgba(r, g, b, 0.85)
+        palette::qualitative(i, 0.85)
     }
 }
 
@@ -717,15 +931,28 @@ mod tests {
         .unwrap();
 
         let (px, py, pw, ph) = model.plot_rect(300.0, 200.0);
-        let cols = 3usize;
-        let col_w = pw / cols as f32;
-        let row_h = (ph / ((3.0f32 / cols as f32).ceil().max(1.0))).max(24.0);
-
-        let x = px + col_w * 0.15 + col_w * 0.70 * 0.5;
-        let y = py + row_h * 0.15 + row_h * 0.70 * 0.5;
+        let layout = model.build_sankey_layout(px, py, pw, ph);
+        let c = layout.node_rects[0].center();
+        let x = c.x;
+        let y = c.y;
         model.on_mouse_move(x, y, 300.0, 200.0);
 
         assert_eq!(model.hover_node, Some(0));
+    }
+
+    #[test]
+    fn sankey_layout_orders_sources_before_sinks() {
+        let model = NetworkChartModel::new_sankey(
+            vec!["src".into(), "mid".into(), "sink".into()],
+            vec![(0, 1, 3.0), (1, 2, 2.0)],
+        )
+        .unwrap();
+
+        let (px, py, pw, ph) = model.plot_rect(320.0, 220.0);
+        let layout = model.build_sankey_layout(px, py, pw, ph);
+        assert!(layout.node_rects[0].x() < layout.node_rects[1].x());
+        assert!(layout.node_rects[1].x() < layout.node_rects[2].x());
+        assert!(!layout.link_paths.is_empty());
     }
 
     #[test]

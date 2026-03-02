@@ -6,6 +6,7 @@ use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::common::{draw_grid, fill_bg};
+use crate::palette;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HierarchyMode {
@@ -143,20 +144,12 @@ impl HierarchyChartModel {
 
     fn leaf_color(&self, depth: usize, i: usize) -> Color {
         // Deterministic palette with depth tint.
-        let hues = [
-            (0.35, 0.65, 1.0),
-            (0.95, 0.55, 0.35),
-            (0.40, 0.85, 0.55),
-            (0.90, 0.75, 0.25),
-            (0.75, 0.55, 0.95),
-            (0.25, 0.80, 0.85),
-        ];
-        let (mut r, mut g, mut b) = hues[i % hues.len()];
+        let mut c = palette::qualitative(i, 0.75);
         let tint = 1.0 - (depth as f32 * 0.08).clamp(0.0, 0.35);
-        r *= tint;
-        g *= tint;
-        b *= tint;
-        Color::rgba(r, g, b, 0.75)
+        c.r *= tint;
+        c.g *= tint;
+        c.b *= tint;
+        c
     }
 
     fn ensure_layout(&mut self, w: f32, h: f32) {
@@ -178,7 +171,7 @@ impl HierarchyChartModel {
 
         match self.style.mode {
             HierarchyMode::Treemap => {
-                self.layout_treemap(&root, Rect::new(px, py, pw, ph), 0, true);
+                self.layout_treemap(&root, Rect::new(px, py, pw, ph), 0);
             }
             HierarchyMode::Icicle => {
                 let max_depth = Self::max_depth(&root);
@@ -214,7 +207,7 @@ impl HierarchyChartModel {
         }
     }
 
-    fn layout_treemap(&mut self, n: &HierarchyNode, rect: Rect, depth: usize, split_x: bool) {
+    fn layout_treemap(&mut self, n: &HierarchyNode, rect: Rect, depth: usize) {
         if n.children.is_empty() {
             self.leaves_px.push(LeafRect {
                 rect,
@@ -224,31 +217,109 @@ impl HierarchyChartModel {
             });
             return;
         }
-        let total: f32 = n.children.iter().map(|c| c.weight().max(0.0)).sum();
-        if total.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+        let total_weight: f32 = n.children.iter().map(|c| c.weight().max(0.0)).sum();
+        if total_weight.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+            || rect.width() <= 0.0
+            || rect.height() <= 0.0
+        {
             return;
         }
 
-        let mut cur = 0.0f32;
-        for c in &n.children {
-            let w = c.weight().max(0.0);
-            if w <= 0.0 {
-                continue;
-            }
-            let t0 = cur / total;
-            cur += w;
-            let t1 = cur / total;
+        #[derive(Clone, Copy)]
+        struct Item {
+            idx: usize,
+            area: f32,
+        }
 
-            let child_rect = if split_x {
-                let x0 = rect.x() + rect.width() * t0;
-                let x1 = rect.x() + rect.width() * t1;
-                Rect::new(x0, rect.y(), (x1 - x0).max(0.0), rect.height())
-            } else {
-                let y0 = rect.y() + rect.height() * t0;
-                let y1 = rect.y() + rect.height() * t1;
-                Rect::new(rect.x(), y0, rect.width(), (y1 - y0).max(0.0))
+        let rect_area = rect.width() * rect.height();
+        let mut items: Vec<Item> = n
+            .children
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| {
+                let w = c.weight().max(0.0);
+                if w > 0.0 {
+                    Some(Item {
+                        idx: i,
+                        area: rect_area * (w / total_weight),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if items.is_empty() {
+            return;
+        }
+        items.sort_by(|a, b| b.area.total_cmp(&a.area));
+
+        let mut free = rect;
+        let mut cursor = 0usize;
+        while cursor < items.len() && free.width() > 0.0 && free.height() > 0.0 {
+            let short_side = free.width().min(free.height()).max(1e-6);
+            let mut row = vec![items[cursor]];
+            cursor += 1;
+
+            let row_worst = |row_items: &[Item]| -> f32 {
+                let row_sum: f32 = row_items.iter().map(|it| it.area).sum();
+                if row_sum <= 0.0 {
+                    return f32::INFINITY;
+                }
+                let min_area = row_items
+                    .iter()
+                    .map(|it| it.area)
+                    .fold(f32::INFINITY, f32::min);
+                let max_area = row_items
+                    .iter()
+                    .map(|it| it.area)
+                    .fold(f32::NEG_INFINITY, f32::max);
+                let s2 = short_side * short_side;
+                ((s2 * max_area) / (row_sum * row_sum)).max((row_sum * row_sum) / (s2 * min_area))
             };
-            self.layout_treemap(c, child_rect, depth + 1, !split_x);
+
+            while cursor < items.len() {
+                let mut candidate = row.clone();
+                candidate.push(items[cursor]);
+                if row_worst(&candidate) <= row_worst(&row) {
+                    row.push(items[cursor]);
+                    cursor += 1;
+                } else {
+                    break;
+                }
+            }
+
+            let row_sum: f32 = row.iter().map(|it| it.area).sum();
+            if free.width() >= free.height() {
+                let row_h = (row_sum / free.width().max(1e-6)).clamp(0.0, free.height());
+                let mut x = free.x();
+                for it in &row {
+                    let w = (it.area / row_h.max(1e-6)).clamp(0.0, free.x() + free.width() - x);
+                    let child_rect = Rect::new(x, free.y(), w, row_h);
+                    self.layout_treemap(&n.children[it.idx], child_rect, depth + 1);
+                    x += w;
+                }
+                free = Rect::new(
+                    free.x(),
+                    free.y() + row_h,
+                    free.width(),
+                    (free.height() - row_h).max(0.0),
+                );
+            } else {
+                let row_w = (row_sum / free.height().max(1e-6)).clamp(0.0, free.width());
+                let mut y = free.y();
+                for it in &row {
+                    let h = (it.area / row_w.max(1e-6)).clamp(0.0, free.y() + free.height() - y);
+                    let child_rect = Rect::new(free.x(), y, row_w, h);
+                    self.layout_treemap(&n.children[it.idx], child_rect, depth + 1);
+                    y += h;
+                }
+                free = Rect::new(
+                    free.x() + row_w,
+                    free.y(),
+                    (free.width() - row_w).max(0.0),
+                    free.height(),
+                );
+            }
         }
     }
 
@@ -328,7 +399,7 @@ impl HierarchyChartModel {
     }
 
     fn layout_packing(&mut self, n: &HierarchyNode, cx: f32, cy: f32, r: f32) {
-        // Naive packing: place leaf circles along a spiral, with radius ~ sqrt(weight).
+        // Deterministic relaxation-based packing from weighted initial seed positions.
         let mut leaves = Vec::new();
         Self::collect_leaves(n, 0, &mut leaves);
         if leaves.is_empty() {
@@ -342,42 +413,57 @@ impl HierarchyChartModel {
         }
 
         let mut placed: Vec<(f32, f32, f32, String, f32, usize)> = Vec::new(); // (x,y,rad,label,val,depth)
+        let leaf_count = leaves.len();
+        let golden = std::f32::consts::PI * (3.0 - 5.0_f32.sqrt());
         for (i, (label, depth, w)) in leaves.into_iter().enumerate() {
             let rr = ((w / total).max(0.0)).sqrt() * r * 0.75;
             let max_rr = (r * 0.35).max(4.0);
             let rr = rr.clamp(4.0, max_rr);
-            if i == 0 {
-                placed.push((0.0, 0.0, rr, label, w, depth));
-                continue;
-            }
-
-            let mut ang = 0.0f32;
-            let mut rad = 0.0f32;
-            let mut best = None;
-            for _ in 0..2_000 {
-                ang += 0.35;
-                rad += 0.18;
-                let x = rad * ang.cos();
-                let y = rad * ang.sin();
-                if x * x + y * y > (r - rr).powi(2) {
-                    continue;
-                }
-                let mut ok = true;
-                for (px, py, pr, ..) in &placed {
-                    let dx = x - *px;
-                    let dy = y - *py;
-                    if dx * dx + dy * dy < (*pr + rr).powi(2) * 1.02 {
-                        ok = false;
-                        break;
-                    }
-                }
-                if ok {
-                    best = Some((x, y));
-                    break;
-                }
-            }
-            let (x, y) = best.unwrap_or((0.0, 0.0));
+            let t = if leaf_count <= 1 {
+                0.0
+            } else {
+                i as f32 / (leaf_count - 1) as f32
+            };
+            let ang = i as f32 * golden;
+            let rad = t.sqrt() * (r - rr).max(0.0);
+            let x = rad * ang.cos();
+            let y = rad * ang.sin();
             placed.push((x, y, rr, label, w, depth));
+        }
+
+        let iter_n = 72usize;
+        for _ in 0..iter_n {
+            for i in 0..placed.len() {
+                for j in (i + 1)..placed.len() {
+                    let (ax, ay, ar, ..) = placed[i];
+                    let (bx, by, br, ..) = placed[j];
+                    let dx = bx - ax;
+                    let dy = by - ay;
+                    let dist2 = dx * dx + dy * dy;
+                    let min_d = ar + br + 0.35;
+                    if dist2 >= min_d * min_d {
+                        continue;
+                    }
+                    let dist = dist2.sqrt().max(1e-6);
+                    let push = (min_d - dist) * 0.5;
+                    let nx = dx / dist;
+                    let ny = dy / dist;
+                    placed[i].0 -= nx * push;
+                    placed[i].1 -= ny * push;
+                    placed[j].0 += nx * push;
+                    placed[j].1 += ny * push;
+                }
+            }
+            for p in &mut placed {
+                let rr = p.2;
+                let limit = (r - rr).max(0.0);
+                let d2 = p.0 * p.0 + p.1 * p.1;
+                if d2 > limit * limit && d2 > 1e-6 {
+                    let d = d2.sqrt();
+                    p.0 = p.0 / d * limit;
+                    p.1 = p.1 / d * limit;
+                }
+            }
         }
 
         for (x, y, rr, label, v, depth) in placed {
@@ -415,8 +501,6 @@ impl HierarchyChartModel {
 
         match self.style.mode {
             HierarchyMode::Sunburst => {
-                // Hover detection for sunburst is approximate: find the first sector
-                // whose annulus wedge contains the point.
                 let cx = px + pw * 0.5;
                 let cy = py + ph * 0.5;
                 let dx = local_x - cx;
@@ -426,17 +510,19 @@ impl HierarchyChartModel {
                 if a < 0.0 {
                     a += std::f32::consts::TAU;
                 }
-                self.hover_leaf = None;
+                let mut best: Option<LeafRect> = None;
                 for leaf in &self.leaves_px {
                     let a0 = leaf.rect.x();
                     let a1 = leaf.rect.y();
                     let r0 = leaf.rect.width();
                     let r1 = leaf.rect.height();
                     if rr >= r0 && rr <= r1 && a >= a0 && a <= a1 {
-                        self.hover_leaf = Some(leaf.clone());
-                        break;
+                        if best.as_ref().map(|b| leaf.depth >= b.depth).unwrap_or(true) {
+                            best = Some(leaf.clone());
+                        }
                     }
                 }
+                self.hover_leaf = best;
             }
             HierarchyMode::Packing => {
                 self.hover_leaf = None;
@@ -673,5 +759,59 @@ mod tests {
         }));
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn treemap_layout_produces_valid_rects() {
+        let root = HierarchyNode::node(
+            "root",
+            vec![
+                HierarchyNode::leaf("a", 6.0),
+                HierarchyNode::leaf("b", 3.0),
+                HierarchyNode::leaf("c", 2.0),
+                HierarchyNode::leaf("d", 1.0),
+            ],
+        );
+        let mut model = HierarchyChartModel::new(root).unwrap();
+        model.style.mode = HierarchyMode::Treemap;
+        model.ensure_layout(320.0, 220.0);
+        assert!(!model.leaves_px.is_empty());
+        assert!(model.leaves_px.iter().all(|l| l.rect.width() >= 0.0));
+        assert!(model.leaves_px.iter().all(|l| l.rect.height() >= 0.0));
+    }
+
+    #[test]
+    fn sunburst_hover_picks_deepest_matching_leaf() {
+        let root = HierarchyNode::node(
+            "root",
+            vec![HierarchyNode::node(
+                "p",
+                vec![
+                    HierarchyNode::leaf("child", 2.0),
+                    HierarchyNode::leaf("sibling", 1.0),
+                ],
+            )],
+        );
+        let mut model = HierarchyChartModel::new(root).unwrap();
+        model.style.mode = HierarchyMode::Sunburst;
+        model.ensure_layout(360.0, 240.0);
+        let target = model
+            .leaves_px
+            .iter()
+            .find(|l| l.label == "child")
+            .cloned()
+            .expect("leaf exists");
+
+        let (px, py, pw, ph) = model.plot_rect(360.0, 240.0);
+        let cx = px + pw * 0.5;
+        let cy = py + ph * 0.5;
+        let a = (target.rect.x() + target.rect.y()) * 0.5;
+        let rr = (target.rect.width() + target.rect.height()) * 0.5;
+        model.on_mouse_move(cx + rr * a.cos(), cy + rr * a.sin(), 360.0, 240.0);
+
+        assert_eq!(
+            model.hover_leaf.as_ref().map(|h| h.label.as_str()),
+            Some("child")
+        );
     }
 }

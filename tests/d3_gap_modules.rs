@@ -1,8 +1,8 @@
-use blinc_charts::axis::build_bottom_ticks;
+use blinc_charts::axis::{build_bottom_ticks, build_bottom_ticks_log};
 use blinc_charts::format::{format_compact, format_fixed};
 use blinc_charts::interpolate::lerp_f32;
 use blinc_charts::polygon::{point_in_polygon, polygon_area, rect_polygon};
-use blinc_charts::scale::{BandScale, LinearScale};
+use blinc_charts::scale::{BandScale, LinearScale, LogScale};
 use blinc_charts::spatial_index::SpatialIndex;
 use blinc_charts::time_format::format_hms;
 use blinc_charts::transition::ValueTransition;
@@ -22,6 +22,17 @@ fn band_scale_returns_valid_band_metrics() {
     let b = BandScale::new(4, 0.0, 400.0, 0.1, 0.05);
     assert!(b.band_width() > 0.0);
     assert!(b.center(0).unwrap() < b.center(3).unwrap());
+}
+
+#[test]
+fn log_scale_and_axis_ticks_work() {
+    let s = LogScale::new(1.0, 1000.0, 0.0, 300.0).unwrap();
+    assert!((s.map(10.0) - 100.0).abs() < 1e-3);
+    let ticks = build_bottom_ticks_log(Domain1D::new(1.0, 1000.0), 0.0, 300.0, 6, |v| {
+        format!("{v:.0}")
+    });
+    assert_eq!(ticks.first().map(|t| t.value), Some(1.0));
+    assert_eq!(ticks.last().map(|t| t.value), Some(1000.0));
 }
 
 #[test]

@@ -47,6 +47,92 @@ impl LinearScale {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LogScale {
+    domain_min: f32,
+    domain_max: f32,
+    range_min: f32,
+    range_max: f32,
+    base: f32,
+}
+
+impl LogScale {
+    pub fn new(domain_min: f32, domain_max: f32, range_min: f32, range_max: f32) -> Option<Self> {
+        Self::with_base(domain_min, domain_max, range_min, range_max, 10.0)
+    }
+
+    pub fn with_base(
+        domain_min: f32,
+        domain_max: f32,
+        range_min: f32,
+        range_max: f32,
+        base: f32,
+    ) -> Option<Self> {
+        if !(domain_min.is_finite()
+            && domain_max.is_finite()
+            && domain_min > 0.0
+            && domain_max > domain_min
+            && base.is_finite()
+            && base > 1.0)
+        {
+            return None;
+        }
+        Some(Self {
+            domain_min,
+            domain_max,
+            range_min,
+            range_max,
+            base,
+        })
+    }
+
+    fn log(&self, x: f32) -> f32 {
+        x.log(self.base)
+    }
+
+    pub fn map(&self, value: f32) -> f32 {
+        let v = value.max(self.domain_min);
+        let a = self.log(self.domain_min);
+        let b = self.log(self.domain_max);
+        let d = (b - a).max(1e-12);
+        let t = (self.log(v) - a) / d;
+        self.range_min + t * (self.range_max - self.range_min)
+    }
+
+    pub fn invert(&self, px: f32) -> f32 {
+        let r = self.range_max - self.range_min;
+        if r.abs() < 1e-12 {
+            return self.domain_min;
+        }
+        let t = (px - self.range_min) / r;
+        let a = self.log(self.domain_min);
+        let b = self.log(self.domain_max);
+        self.base.powf(a + t * (b - a))
+    }
+
+    pub fn ticks(&self, count: usize) -> Vec<f32> {
+        let min_exp = self.log(self.domain_min).floor() as i32;
+        let max_exp = self.log(self.domain_max).ceil() as i32;
+        let mut out = Vec::new();
+        for e in min_exp..=max_exp {
+            let v = self.base.powi(e);
+            if v >= self.domain_min && v <= self.domain_max {
+                out.push(v);
+            }
+        }
+        if out.is_empty() {
+            return LinearScale::new(
+                self.domain_min,
+                self.domain_max,
+                self.range_min,
+                self.range_max,
+            )
+            .ticks(count);
+        }
+        out
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BandScale {
     count: usize,
     start: f32,
@@ -130,5 +216,18 @@ mod tests {
         let b = BandScale::new(0, 0.0, 100.0, 0.1, 0.05);
         assert_eq!(b.band_width(), 0.0);
         assert!(b.band_start(0).is_none());
+    }
+
+    #[test]
+    fn log_scale_maps_and_inverts() {
+        let s = LogScale::new(1.0, 1000.0, 0.0, 300.0).unwrap();
+        assert!((s.map(10.0) - 100.0).abs() < 1e-4);
+        assert!((s.invert(100.0) - 10.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn log_scale_ticks_use_powers_of_ten() {
+        let s = LogScale::new(1.0, 1000.0, 0.0, 300.0).unwrap();
+        assert_eq!(s.ticks(5), vec![1.0, 10.0, 100.0, 1000.0]);
     }
 }

@@ -3,11 +3,13 @@ use std::sync::{Arc, Mutex};
 use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 use blinc_layout::ElementBuilder;
 
+use crate::annotation::{draw_annotations, ChartAnnotation};
 use crate::axis::{build_bottom_ticks, build_left_ticks, draw_bottom_axis, draw_left_axis};
 use crate::brush::BrushX;
 use crate::common::{draw_grid, fill_bg};
 use crate::format::format_compact;
 use crate::link::ChartLinkHandle;
+use crate::palette;
 use crate::time_format::format_time_or_number;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
@@ -73,6 +75,7 @@ pub struct BarChartModel {
 
     pub crosshair_x: Option<f32>,
     pub hover_x: Option<f32>,
+    pub annotations: Vec<ChartAnnotation>,
 
     bins: Vec<f32>, // bins_n * series_n
     counts: Vec<u32>,
@@ -89,38 +92,31 @@ impl BarChartModel {
             !series.is_empty(),
             "BarChartModel requires at least 1 series"
         );
-        anyhow::ensure!(
-            !series
-                .iter()
-                .flat_map(|s| s.y.iter())
-                .any(|v| v.is_finite() && *v < 0.0),
-            "BarChartModel does not support negative values"
-        );
 
         let mut x_min = f32::INFINITY;
         let mut x_max = f32::NEG_INFINITY;
         let mut y_min = f32::INFINITY;
-        let mut y_max_pos_sum = 0.0f32;
+        let mut y_max = f32::NEG_INFINITY;
 
         for s in &series {
             let (sx0, sx1) = s.x_min_max();
             x_min = x_min.min(sx0);
             x_max = x_max.max(sx1);
-            let (sy0, sy1) = s.y_min_max();
-            y_min = y_min.min(sy0);
-            if sy1.is_finite() {
-                y_max_pos_sum += sy1.max(0.0);
+            for &v in s.y.iter() {
+                if !v.is_finite() {
+                    continue;
+                }
+                y_min = y_min.min(v);
+                y_max = y_max.max(v);
             }
         }
 
-        if !y_min.is_finite() {
+        if !y_min.is_finite() || !y_max.is_finite() {
             y_min = -1.0;
+            y_max = 1.0;
         }
-        let mut y_max = if y_max_pos_sum.is_finite() && y_max_pos_sum > y_min {
-            y_max_pos_sum
-        } else {
-            1.0
-        };
+        y_min = y_min.min(0.0);
+        y_max = y_max.max(0.0);
         if y_max.partial_cmp(&y_min) != Some(std::cmp::Ordering::Greater) {
             y_max = y_min + 1.0;
         }
@@ -132,6 +128,7 @@ impl BarChartModel {
             style: BarChartStyle::default(),
             crosshair_x: None,
             hover_x: None,
+            annotations: Vec::new(),
             bins: Vec::new(),
             counts: Vec::new(),
             bins_n: 0,
@@ -146,17 +143,7 @@ impl BarChartModel {
     }
 
     fn series_color(&self, i: usize) -> Color {
-        // Simple deterministic palette (good enough for now).
-        let hues = [
-            (0.35, 0.65, 1.0),
-            (0.95, 0.55, 0.35),
-            (0.40, 0.85, 0.55),
-            (0.90, 0.75, 0.25),
-            (0.75, 0.55, 0.95),
-            (0.25, 0.80, 0.85),
-        ];
-        let (r, g, b) = hues[i % hues.len()];
-        Color::rgba(r, g, b, self.style.bar_alpha)
+        palette::qualitative(i, self.style.bar_alpha)
     }
 
     pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
@@ -319,18 +306,32 @@ impl BarChartModel {
             }
         }
 
-        // Expand y domain to fit current bins (stacked sum).
+        // Expand y domain to fit current bins (stacked sum, with diverging sign support).
         if self.style.stacked {
             let mut max_sum = 0.0f32;
+            let mut min_sum = 0.0f32;
             for bin in 0..bins_n {
-                let mut sum = 0.0f32;
+                let mut pos = 0.0f32;
+                let mut neg = 0.0f32;
                 for s_idx in 0..series_n {
-                    sum += self.bins[s_idx * bins_n + bin].max(0.0);
+                    let v = self.bins[s_idx * bins_n + bin];
+                    if v >= 0.0 {
+                        pos += v;
+                    } else {
+                        neg += v;
+                    }
                 }
-                max_sum = max_sum.max(sum);
+                max_sum = max_sum.max(pos);
+                min_sum = min_sum.min(neg);
             }
-            if max_sum.is_finite() && max_sum > self.view.domain.y.min {
-                self.view.domain.y.max = max_sum.max(self.view.domain.y.min + 1e-6);
+            if min_sum.is_finite() {
+                self.view.domain.y.min = min_sum.min(0.0);
+            }
+            if max_sum.is_finite() {
+                self.view.domain.y.max = max_sum.max(0.0);
+            }
+            if self.view.domain.y.max <= self.view.domain.y.min {
+                self.view.domain.y.max = self.view.domain.y.min + 1e-6;
             }
         }
 
@@ -363,12 +364,21 @@ impl BarChartModel {
             let x = px + bin as f32 * (pw / self.bins_n as f32);
 
             if self.style.stacked {
-                let mut acc = baseline_y;
+                let mut acc_pos = baseline_y;
+                let mut acc_neg = baseline_y;
                 for s_idx in 0..series_n {
                     let v = self.bins[s_idx * self.bins_n + bin];
-                    let y0 = acc;
-                    let y1 = acc + v;
-                    acc = y1;
+                    let (y0, y1) = if v >= 0.0 {
+                        let y0 = acc_pos;
+                        let y1 = acc_pos + v;
+                        acc_pos = y1;
+                        (y0, y1)
+                    } else {
+                        let y0 = acc_neg;
+                        let y1 = acc_neg + v;
+                        acc_neg = y1;
+                        (y0, y1)
+                    };
 
                     let y0_px = self.view.y_to_px(y0, py, ph);
                     let y1_px = self.view.y_to_px(y1, py, ph);
@@ -438,6 +448,12 @@ impl BarChartModel {
         );
         let y_ticks = build_left_ticks(self.view.domain.y, py, ph, 5, format_compact);
         draw_left_axis(ctx, &y_ticks, px, py, ph, self.style.grid, self.style.text);
+        draw_annotations(
+            ctx,
+            &self.annotations,
+            |p| self.view.data_to_px(p, px, py, pw, ph),
+            self.style.text,
+        );
 
         if let Some(x) = self.hover_x {
             let text = format!("x={}", format_time_or_number(x));
@@ -546,8 +562,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_rejects_negative_values() {
+    fn new_accepts_negative_values() {
         let series = TimeSeriesF32::new(vec![0.0, 1.0], vec![1.0, -0.5]).unwrap();
-        assert!(BarChartModel::new(vec![series]).is_err());
+        let model = BarChartModel::new(vec![series]).unwrap();
+        assert!(model.view.domain.y.min <= -0.5);
+        assert!(model.view.domain.y.max >= 1.0);
+    }
+
+    #[test]
+    fn stacked_domain_tracks_positive_and_negative_sums() {
+        let s_pos = TimeSeriesF32::new(vec![0.0, 1.0], vec![2.0, 1.5]).unwrap();
+        let s_neg = TimeSeriesF32::new(vec![0.0, 1.0], vec![-3.0, -4.0]).unwrap();
+        let mut model = BarChartModel::new(vec![s_pos, s_neg]).unwrap();
+        model.style.stacked = true;
+        model.ensure_bins(320.0, 180.0);
+        assert!(model.view.domain.y.max >= 1.99);
+        assert!(model.view.domain.y.min <= -3.99);
     }
 }

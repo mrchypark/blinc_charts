@@ -1,12 +1,20 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
+use blinc_core::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
 use blinc_layout::ElementBuilder;
 
 use crate::brush::BrushX;
 use crate::common::{draw_grid, fill_bg};
 use crate::view::{ChartView, Domain1D, Domain2D};
 use crate::xy_stack::InteractiveXChartModel;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StatisticsMode {
+    #[default]
+    Boxplot,
+    Violin,
+    ErrorBand,
+}
 
 #[derive(Clone, Debug)]
 pub struct StatisticsChartStyle {
@@ -15,6 +23,7 @@ pub struct StatisticsChartStyle {
     pub text: Color,
     pub accent: Color,
     pub crosshair: Color,
+    pub mode: StatisticsMode,
 
     pub scroll_zoom_factor: f32,
     pub pinch_zoom_min: f32,
@@ -28,19 +37,23 @@ impl Default for StatisticsChartStyle {
             text: Color::rgba(1.0, 1.0, 1.0, 0.85),
             accent: Color::rgba(0.35, 0.65, 1.0, 0.85),
             crosshair: Color::rgba(1.0, 1.0, 1.0, 0.35),
+            mode: StatisticsMode::Boxplot,
             scroll_zoom_factor: 0.02,
             pinch_zoom_min: 0.01,
         }
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct GroupStats {
     q1: f32,
     med: f32,
     q3: f32,
     lo: f32,
     hi: f32,
+    mean: f32,
+    std: f32,
+    outliers: Vec<f32>,
 }
 
 pub struct StatisticsChartModel {
@@ -148,6 +161,21 @@ impl StatisticsChartModel {
                     break;
                 }
             }
+            let mean = vals.iter().copied().sum::<f32>() / vals.len() as f32;
+            let var = vals
+                .iter()
+                .map(|v| {
+                    let d = *v - mean;
+                    d * d
+                })
+                .sum::<f32>()
+                / vals.len() as f32;
+            let std = var.sqrt();
+            let outliers: Vec<f32> = vals
+                .iter()
+                .copied()
+                .filter(|v| *v < lo_fence || *v > hi_fence)
+                .collect();
 
             self.group_stats.push(Some(GroupStats {
                 q1,
@@ -155,6 +183,9 @@ impl StatisticsChartModel {
                 q3,
                 lo,
                 hi,
+                mean,
+                std,
+                outliers,
             }));
         }
     }
@@ -287,73 +318,207 @@ impl StatisticsChartModel {
             return;
         }
 
+        let mut mean_pts = Vec::<Point>::new();
+        let mut band_top = Vec::<Point>::new();
+        let mut band_bot = Vec::<Point>::new();
+
         for i in i0..i1 {
-            let Some(st) = self.group_stats.get(i).and_then(|s| *s) else {
+            let Some(st) = self.group_stats.get(i).and_then(|s| s.as_ref()) else {
                 continue;
             };
 
             let xc = self.view.x_to_px(i as f32 + 0.5, px, pw);
-            let q1 = self.view.y_to_px(st.q1, py, ph);
-            let q3 = self.view.y_to_px(st.q3, py, ph);
-            let med = self.view.y_to_px(st.med, py, ph);
-            let lo = self.view.y_to_px(st.lo, py, ph);
-            let hi = self.view.y_to_px(st.hi, py, ph);
+            match self.style.mode {
+                StatisticsMode::Boxplot => {
+                    let q1 = self.view.y_to_px(st.q1, py, ph);
+                    let q3 = self.view.y_to_px(st.q3, py, ph);
+                    let med = self.view.y_to_px(st.med, py, ph);
+                    let lo = self.view.y_to_px(st.lo, py, ph);
+                    let hi = self.view.y_to_px(st.hi, py, ph);
 
-            let top = q3.min(q1);
-            let bot = q3.max(q1);
-            let rect = Rect::new(xc - box_w * 0.5, top, box_w, (bot - top).max(1.0));
+                    let top = q3.min(q1);
+                    let bot = q3.max(q1);
+                    let rect = Rect::new(xc - box_w * 0.5, top, box_w, (bot - top).max(1.0));
+                    ctx.fill_rect(
+                        rect,
+                        6.0.into(),
+                        Brush::Solid(Color::rgba(
+                            self.style.accent.r,
+                            self.style.accent.g,
+                            self.style.accent.b,
+                            0.25,
+                        )),
+                    );
+                    ctx.stroke_rect(rect, 6.0.into(), &stroke, Brush::Solid(self.style.accent));
+                    ctx.stroke_polyline(
+                        &[
+                            Point::new(rect.x() + 2.0, med),
+                            Point::new(rect.x() + rect.width() - 2.0, med),
+                        ],
+                        &Stroke::new(2.0),
+                        Brush::Solid(self.style.accent),
+                    );
+                    let xw = xc;
+                    ctx.stroke_polyline(
+                        &[Point::new(xw, lo), Point::new(xw, top)],
+                        &stroke,
+                        Brush::Solid(self.style.accent),
+                    );
+                    ctx.stroke_polyline(
+                        &[Point::new(xw, bot), Point::new(xw, hi)],
+                        &stroke,
+                        Brush::Solid(self.style.accent),
+                    );
+                    let cap = (box_w * 0.4).clamp(6.0, 18.0);
+                    ctx.stroke_polyline(
+                        &[
+                            Point::new(xw - cap * 0.5, lo),
+                            Point::new(xw + cap * 0.5, lo),
+                        ],
+                        &stroke,
+                        Brush::Solid(self.style.accent),
+                    );
+                    ctx.stroke_polyline(
+                        &[
+                            Point::new(xw - cap * 0.5, hi),
+                            Point::new(xw + cap * 0.5, hi),
+                        ],
+                        &stroke,
+                        Brush::Solid(self.style.accent),
+                    );
+                    for &ov in &st.outliers {
+                        ctx.fill_circle(
+                            Point::new(xc, self.view.y_to_px(ov, py, ph)),
+                            2.0,
+                            Brush::Solid(Color::rgba(
+                                self.style.accent.r,
+                                self.style.accent.g,
+                                self.style.accent.b,
+                                0.95,
+                            )),
+                        );
+                    }
+                }
+                StatisticsMode::Violin => {
+                    let vals: Vec<f32> = self.groups[i]
+                        .iter()
+                        .copied()
+                        .filter(|v| v.is_finite())
+                        .collect();
+                    if vals.is_empty() {
+                        continue;
+                    }
+                    let bins = 22usize;
+                    let y_min = self.view.domain.y.min;
+                    let y_max = self.view.domain.y.max;
+                    let span = (y_max - y_min).max(1e-6);
+                    let mut hist = vec![0usize; bins];
+                    for &v in &vals {
+                        let t = ((v - y_min) / span).clamp(0.0, 0.999_999);
+                        let bi = (t * bins as f32) as usize;
+                        hist[bi] += 1;
+                    }
+                    let hmax = hist.iter().copied().max().unwrap_or(1).max(1) as f32;
+                    let half_w = box_w * 0.55;
+                    let mut top_pts = Vec::with_capacity(bins);
+                    let mut bot_pts = Vec::with_capacity(bins);
+                    for (bi, &c) in hist.iter().enumerate() {
+                        let yv = y_min + (bi as f32 + 0.5) / bins as f32 * span;
+                        let y = self.view.y_to_px(yv, py, ph);
+                        let hw = half_w * (c as f32 / hmax).sqrt();
+                        top_pts.push(Point::new(xc + hw, y));
+                        bot_pts.push(Point::new(xc - hw, y));
+                    }
+                    if !top_pts.is_empty() {
+                        let mut path = Path::new().move_to(top_pts[0].x, top_pts[0].y);
+                        for p in &top_pts[1..] {
+                            path = path.line_to(p.x, p.y);
+                        }
+                        for p in bot_pts.iter().rev() {
+                            path = path.line_to(p.x, p.y);
+                        }
+                        path = path.close();
+                        ctx.fill_path(
+                            &path,
+                            Brush::Solid(Color::rgba(
+                                self.style.accent.r,
+                                self.style.accent.g,
+                                self.style.accent.b,
+                                0.24,
+                            )),
+                        );
+                        ctx.stroke_path(&path, &stroke, Brush::Solid(self.style.accent));
+                    }
+                    let med_y = self.view.y_to_px(st.med, py, ph);
+                    ctx.stroke_polyline(
+                        &[
+                            Point::new(xc - box_w * 0.22, med_y),
+                            Point::new(xc + box_w * 0.22, med_y),
+                        ],
+                        &Stroke::new(1.5),
+                        Brush::Solid(self.style.accent),
+                    );
+                }
+                StatisticsMode::ErrorBand => {
+                    let mean = st.mean;
+                    let std = st.std.max(0.0);
+                    let mean_y = self.view.y_to_px(mean, py, ph);
+                    let lo_y = self.view.y_to_px(mean - std, py, ph);
+                    let hi_y = self.view.y_to_px(mean + std, py, ph);
+                    mean_pts.push(Point::new(xc, mean_y));
+                    band_top.push(Point::new(xc, hi_y));
+                    band_bot.push(Point::new(xc, lo_y));
+                    ctx.stroke_polyline(
+                        &[Point::new(xc, lo_y), Point::new(xc, hi_y)],
+                        &stroke,
+                        Brush::Solid(self.style.accent),
+                    );
+                    let cap = (box_w * 0.35).clamp(4.0, 14.0);
+                    ctx.stroke_polyline(
+                        &[
+                            Point::new(xc - cap, lo_y),
+                            Point::new(xc + cap, lo_y),
+                            Point::new(xc + cap, hi_y),
+                            Point::new(xc - cap, hi_y),
+                        ],
+                        &Stroke::new(1.0),
+                        Brush::Solid(Color::rgba(
+                            self.style.accent.r,
+                            self.style.accent.g,
+                            self.style.accent.b,
+                            0.55,
+                        )),
+                    );
+                }
+            }
+        }
 
-            ctx.fill_rect(
-                rect,
-                6.0.into(),
+        if self.style.mode == StatisticsMode::ErrorBand && mean_pts.len() >= 2 {
+            let mut path = Path::new().move_to(band_top[0].x, band_top[0].y);
+            for p in &band_top[1..] {
+                path = path.line_to(p.x, p.y);
+            }
+            for p in band_bot.iter().rev() {
+                path = path.line_to(p.x, p.y);
+            }
+            path = path.close();
+            ctx.fill_path(
+                &path,
                 Brush::Solid(Color::rgba(
                     self.style.accent.r,
                     self.style.accent.g,
                     self.style.accent.b,
-                    0.25,
+                    0.18,
                 )),
             );
-            ctx.stroke_rect(rect, 6.0.into(), &stroke, Brush::Solid(self.style.accent));
-
-            // Median
             ctx.stroke_polyline(
-                &[
-                    Point::new(rect.x() + 2.0, med),
-                    Point::new(rect.x() + rect.width() - 2.0, med),
-                ],
+                &mean_pts,
                 &Stroke::new(2.0),
                 Brush::Solid(self.style.accent),
             );
-
-            // Whiskers + caps
-            let xw = xc;
-            ctx.stroke_polyline(
-                &[Point::new(xw, lo), Point::new(xw, top)],
-                &stroke,
-                Brush::Solid(self.style.accent),
-            );
-            ctx.stroke_polyline(
-                &[Point::new(xw, bot), Point::new(xw, hi)],
-                &stroke,
-                Brush::Solid(self.style.accent),
-            );
-            let cap = (box_w * 0.4).clamp(6.0, 18.0);
-            ctx.stroke_polyline(
-                &[
-                    Point::new(xw - cap * 0.5, lo),
-                    Point::new(xw + cap * 0.5, lo),
-                ],
-                &stroke,
-                Brush::Solid(self.style.accent),
-            );
-            ctx.stroke_polyline(
-                &[
-                    Point::new(xw - cap * 0.5, hi),
-                    Point::new(xw + cap * 0.5, hi),
-                ],
-                &stroke,
-                Brush::Solid(self.style.accent),
-            );
+            for p in &mean_pts {
+                ctx.fill_circle(*p, 2.5, Brush::Solid(self.style.accent));
+            }
         }
     }
 
@@ -383,10 +548,10 @@ impl StatisticsChartModel {
         }
 
         if let Some(i) = self.hover_group {
-            let text = if let Some(st) = self.group_stats.get(i).and_then(|s| *s) {
+            let text = if let Some(st) = self.group_stats.get(i).and_then(|s| s.as_ref()) {
                 format!(
-                    "group={i}  q1={:.2}  med={:.2}  q3={:.2}",
-                    st.q1, st.med, st.q3
+                    "group={i}  q1={:.2}  med={:.2}  q3={:.2}  mean={:.2}  sd={:.2}",
+                    st.q1, st.med, st.q3, st.mean, st.std
                 )
             } else {
                 format!("group={i}")
@@ -494,6 +659,39 @@ mod tests {
             model.render_plot(&mut ctx, 320.0, 200.0);
         }));
 
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn violin_mode_renders_without_panic() {
+        let mut model = StatisticsChartModel::new(vec![
+            vec![1.0, 2.0, 2.2, 2.4, 3.0],
+            vec![0.2, 0.4, 0.9, 1.0, 1.4],
+        ])
+        .unwrap();
+        model.style.mode = StatisticsMode::Violin;
+
+        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            model.render_plot(&mut ctx, 320.0, 200.0);
+        }));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn error_band_mode_renders_without_panic() {
+        let mut model = StatisticsChartModel::new(vec![
+            vec![1.0, 2.0, 3.0, 4.0],
+            vec![2.0, 2.5, 3.5, 4.2],
+            vec![3.0, 3.2, 4.1, 4.6],
+        ])
+        .unwrap();
+        model.style.mode = StatisticsMode::ErrorBand;
+
+        let mut ctx = RecordingContext::new(Size::new(360.0, 220.0));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            model.render_plot(&mut ctx, 360.0, 220.0);
+        }));
         assert!(result.is_ok());
     }
 }

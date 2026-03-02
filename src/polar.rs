@@ -6,6 +6,7 @@ use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
 
 use crate::common::{draw_grid, fill_bg};
+use crate::palette;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PolarChartMode {
@@ -96,16 +97,7 @@ impl PolarChartModel {
     }
 
     fn series_color(&self, i: usize) -> Color {
-        let hues = [
-            (0.35, 0.65, 1.0),
-            (0.95, 0.55, 0.35),
-            (0.40, 0.85, 0.55),
-            (0.90, 0.75, 0.25),
-            (0.75, 0.55, 0.95),
-            (0.25, 0.80, 0.85),
-        ];
-        let (r, g, b) = hues[i % hues.len()];
-        Color::rgba(r, g, b, 0.85)
+        palette::qualitative(i, 0.85)
     }
 
     pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {

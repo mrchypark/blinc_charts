@@ -7,6 +7,7 @@
 //! - Use Blinc's built-in event routing (mouse/touch/scroll/pinch/drag)
 //! - Prioritize performance for large datasets via sampling/LOD and GPU pipelines
 
+pub mod annotation;
 pub mod axis;
 mod brush;
 mod common;
@@ -15,6 +16,7 @@ pub mod input;
 pub mod interpolate;
 mod link;
 mod lod;
+pub mod palette;
 pub mod polygon;
 pub mod scale;
 mod segments;
@@ -44,6 +46,7 @@ pub mod scatter;
 pub mod stacked_area;
 pub mod statistics;
 
+pub use annotation::ChartAnnotation;
 pub use brush::BrushX;
 pub use candlestick::{Candle, CandleSeries};
 pub use input::{ChartInputBindings, DragAction, DragBinding, ModifiersReq};
@@ -55,6 +58,7 @@ pub use view::{ChartView, Domain1D, Domain2D};
 
 /// Common imports for chart users.
 pub mod prelude {
+    pub use crate::annotation::ChartAnnotation;
     pub use crate::area::{
         area_chart, area_chart_with_bindings, linked_area_chart, linked_area_chart_with_bindings,
         AreaChartHandle, AreaChartModel, AreaChartStyle,
@@ -117,9 +121,10 @@ pub mod prelude {
     };
     pub use crate::statistics::{
         statistics_chart, statistics_chart_with_bindings, StatisticsChartHandle,
-        StatisticsChartModel, StatisticsChartStyle,
+        StatisticsChartModel, StatisticsChartStyle, StatisticsMode,
     };
     pub use crate::time_series::TimeSeriesF32;
     pub use crate::view::{ChartView, Domain1D, Domain2D};
+    pub use crate::{palette, scale::BandScale, scale::LinearScale, scale::LogScale};
     pub use crate::{ChartInputBindings, DragAction, DragBinding, ModifiersReq};
 }

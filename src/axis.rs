@@ -1,6 +1,6 @@
 use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextBaseline, TextStyle};
 
-use crate::scale::LinearScale;
+use crate::scale::{LinearScale, LogScale};
 use crate::view::Domain1D;
 
 // Fallback width used only when backend text measurement is unavailable.
@@ -60,6 +60,58 @@ where
     }
     // Invert so larger values are visually higher.
     let s = LinearScale::new(domain.min, domain.max, plot_y + plot_h, plot_y);
+    s.ticks(tick_count)
+        .into_iter()
+        .map(|v| AxisTick {
+            value: v,
+            px: s.map(v),
+            label: formatter(v),
+        })
+        .collect()
+}
+
+pub fn build_bottom_ticks_log<F>(
+    domain: Domain1D,
+    plot_x: f32,
+    plot_w: f32,
+    tick_count: usize,
+    formatter: F,
+) -> Vec<AxisTick>
+where
+    F: Fn(f32) -> String,
+{
+    if tick_count == 0 || !domain.is_valid() || plot_w <= 0.0 || domain.min <= 0.0 {
+        return Vec::new();
+    }
+    let Some(s) = LogScale::new(domain.min, domain.max, plot_x, plot_x + plot_w) else {
+        return Vec::new();
+    };
+    s.ticks(tick_count)
+        .into_iter()
+        .map(|v| AxisTick {
+            value: v,
+            px: s.map(v),
+            label: formatter(v),
+        })
+        .collect()
+}
+
+pub fn build_left_ticks_log<F>(
+    domain: Domain1D,
+    plot_y: f32,
+    plot_h: f32,
+    tick_count: usize,
+    formatter: F,
+) -> Vec<AxisTick>
+where
+    F: Fn(f32) -> String,
+{
+    if tick_count == 0 || !domain.is_valid() || plot_h <= 0.0 || domain.min <= 0.0 {
+        return Vec::new();
+    }
+    let Some(s) = LogScale::new(domain.min, domain.max, plot_y + plot_h, plot_y) else {
+        return Vec::new();
+    };
     s.ticks(tick_count)
         .into_iter()
         .map(|v| AxisTick {
@@ -161,5 +213,15 @@ mod tests {
         });
         assert!(bottom.is_empty());
         assert!(left.is_empty());
+    }
+
+    #[test]
+    fn log_tick_builder_returns_power_ticks() {
+        let ticks = build_bottom_ticks_log(Domain1D::new(1.0, 1000.0), 0.0, 200.0, 5, |v| {
+            format!("{v:.0}")
+        });
+        assert_eq!(ticks.len(), 4);
+        assert_eq!(ticks.first().map(|t| t.value), Some(1.0));
+        assert_eq!(ticks.last().map(|t| t.value), Some(1000.0));
     }
 }
