@@ -1,11 +1,12 @@
 [package]
 name = "blinc_charts"
 description = "High-performance interactive charts for Blinc (GPU-accelerated, canvas-first)"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-rust-version.workspace = true
+version = "0.1.14"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/mrchypark/blinc_charts"
+rust-version = "1.75"
+readme = "README.md"
 keywords = ["ui", "gui", "charts", "canvas", "blinc"]
 categories = ["gui", "graphics", "visualization"]
 
@@ -16,9 +17,9 @@ crate-type = ["lib"]
 default = []
 
 [dependencies]
-blinc_core = { path = "../blinc_core", version = "0.1.12" }
-blinc_layout = { path = "../blinc_layout", version = "0.1.12" }
+blinc_core = { git = "https://github.com/mrchypark/Blinc.git", branch = "main", package = "blinc_core" }
+blinc_layout = { git = "https://github.com/mrchypark/Blinc.git", branch = "main", package = "blinc_layout" }
 
-anyhow.workspace = true
-rustc-hash.workspace = true
-tracing.workspace = true
+anyhow = "1.0"
+rustc-hash = "2.0"
+tracing = "0.1"
