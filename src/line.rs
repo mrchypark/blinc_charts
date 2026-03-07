@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use blinc_core::{Brush, Color, CornerRadius, DrawContext, Point, Rect, Stroke, TextStyle};
 use blinc_layout::ElementBuilder;
 
-use crate::axis::{build_bottom_ticks, build_left_ticks, draw_bottom_axis, draw_left_axis};
+use crate::axis::{
+    build_bottom_ticks, build_left_ticks, draw_bottom_axis, draw_left_axis, AxisTick,
+};
 use crate::brush::BrushX;
 use crate::format::format_compact;
 use crate::link::ChartLinkHandle;
@@ -29,6 +31,49 @@ impl SampleKey {
             plot_w: plot_w.to_bits(),
             plot_h: plot_h.to_bits(),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AxisCacheKey {
+    x_min: u32,
+    x_max: u32,
+    y_min: u32,
+    y_max: u32,
+    plot_x: u32,
+    plot_y: u32,
+    plot_w: u32,
+    plot_h: u32,
+}
+
+impl AxisCacheKey {
+    fn new(model: &LineChartModel, plot: (f32, f32, f32, f32)) -> Self {
+        let (px, py, pw, ph) = plot;
+        Self {
+            x_min: model.view.domain.x.min.to_bits(),
+            x_max: model.view.domain.x.max.to_bits(),
+            y_min: model.view.domain.y.min.to_bits(),
+            y_max: model.view.domain.y.max.to_bits(),
+            plot_x: px.to_bits(),
+            plot_y: py.to_bits(),
+            plot_w: pw.to_bits(),
+            plot_h: ph.to_bits(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct AxisCache {
+    key: Option<AxisCacheKey>,
+    bottom_ticks: Vec<AxisTick>,
+    left_ticks: Vec<AxisTick>,
+}
+
+impl AxisCache {
+    fn clear(&mut self) {
+        self.key = None;
+        self.bottom_ticks.clear();
+        self.left_ticks.clear();
     }
 }
 
@@ -79,6 +124,7 @@ pub struct LineChartModel {
     // Cache key for (re)sampling. Hover-only interactions should not force
     // downsampling or point transforms on every frame.
     last_sample_key: Option<SampleKey>,
+    axis_cache: AxisCache,
 
     // EventRouter's drag_delta_x/y are "offset from drag start", not per-frame deltas.
     // Track last observed totals so we can convert to incremental deltas for panning.
@@ -113,6 +159,7 @@ impl LineChartModel {
             downsample_params: DownsampleParams::default(),
             user_max_points: DownsampleParams::default().max_points,
             last_sample_key: None,
+            axis_cache: AxisCache::default(),
             last_drag_total_x: None,
             brush_x: BrushX::default(),
         }
@@ -324,6 +371,20 @@ impl LineChartModel {
         self.last_sample_key = Some(key);
     }
 
+    fn axis_ticks(&mut self, plot: (f32, f32, f32, f32)) -> (&[AxisTick], &[AxisTick]) {
+        let key = AxisCacheKey::new(self, plot);
+        if self.axis_cache.key != Some(key) {
+            let (px, py, pw, ph) = plot;
+            self.axis_cache.bottom_ticks =
+                build_bottom_ticks(self.view.domain.x, px, pw, 5, format_time_or_number);
+            self.axis_cache.left_ticks =
+                build_left_ticks(self.view.domain.y, py, ph, 5, format_compact);
+            self.axis_cache.key = Some(key);
+        }
+
+        (&self.axis_cache.bottom_ticks, &self.axis_cache.left_ticks)
+    }
+
     pub fn render_plot(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
         // Background
         ctx.fill_rect(
@@ -366,6 +427,7 @@ impl LineChartModel {
     pub fn render_overlay(&mut self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
+            self.axis_cache.clear();
             return;
         }
 
@@ -390,21 +452,15 @@ impl LineChartModel {
             );
         }
 
-        let x_ticks = build_bottom_ticks(self.view.domain.x, px, pw, 5, format_time_or_number);
-        draw_bottom_axis(
-            ctx,
-            &x_ticks,
-            px,
-            py + ph,
-            pw,
-            self.style.grid,
-            self.style.text,
-        );
-        let y_ticks = build_left_ticks(self.view.domain.y, py, ph, 5, format_compact);
-        draw_left_axis(ctx, &y_ticks, px, py, ph, self.style.grid, self.style.text);
+        let grid = self.style.grid;
+        let text = self.style.text;
+        let hover_point = self.hover_point;
+        let (x_ticks, y_ticks) = self.axis_ticks((px, py, pw, ph));
+        draw_bottom_axis(ctx, x_ticks, px, py + ph, pw, grid, text);
+        draw_left_axis(ctx, y_ticks, px, py, ph, grid, text);
 
         // Tooltip (simple)
-        if let Some(p) = self.hover_point {
+        if let Some(p) = hover_point {
             let text = format!(
                 "x={}  y={}",
                 format_time_or_number(p.x),
@@ -593,5 +649,18 @@ mod tests {
         let damage = model.on_mouse_move(120.0, 40.0, 320.0, 200.0);
 
         assert_eq!(damage, ChartDamage::Overlay);
+    }
+
+    #[test]
+    fn axis_cache_key_changes_when_domain_changes() {
+        let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
+        let mut model = LineChartModel::new(series);
+        let plot = model.plot_rect(320.0, 200.0);
+        let initial = AxisCacheKey::new(&model, plot);
+
+        model.view.domain.x.pan_by(1.0);
+
+        let updated = AxisCacheKey::new(&model, plot);
+        assert_ne!(initial, updated);
     }
 }
