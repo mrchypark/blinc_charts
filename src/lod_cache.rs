@@ -109,9 +109,7 @@ impl SeriesLodCache {
             return;
         };
 
-        if out.capacity() < end - start {
-            return;
-        }
+        out.reserve(end - start);
         out.extend_from_slice(&self.levels[level_idx][start..end]);
     }
 
@@ -211,7 +209,7 @@ mod tests {
         let y: Vec<f32> = (0..10_000).map(|i| (i as f32).sin()).collect();
         let series = TimeSeriesF32::new(x, y).unwrap();
         let cache = SeriesLodCache::build(&series, 32, 8, 1 << 20);
-        let mut out = Vec::with_capacity(520);
+        let mut out = Vec::new();
 
         cache.query_into(100.0, 9000.0, 512, &mut out);
 
@@ -237,7 +235,7 @@ mod tests {
         y[2048] = -100.0;
         let series = TimeSeriesF32::new(x, y).unwrap();
         let cache = SeriesLodCache::build(&series, 32, 8, 1 << 20);
-        let mut out = Vec::<Point>::with_capacity(136);
+        let mut out = Vec::<Point>::new();
 
         cache.query_into(0.0, 4095.0, 128, &mut out);
 

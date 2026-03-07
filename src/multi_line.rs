@@ -4,6 +4,7 @@ use blinc_core::{Brush, Color, CornerRadius, DrawContext, Point, Rect, Stroke, T
 use blinc_layout::ElementBuilder;
 
 use crate::brush::BrushX;
+use crate::density_map::draw_density_bins;
 use crate::link::ChartLinkHandle;
 use crate::lod::{downsample_min_max, DownsampleParams};
 use crate::lod_cache::{SeriesIdentity, SeriesLodCache};
@@ -15,6 +16,10 @@ use crate::xy_stack::{ChartDamage, InteractiveXChartModel};
 const MULTI_LINE_LOD_MIN_BUCKET: usize = 32;
 const MULTI_LINE_LOD_MAX_LEVELS: usize = 8;
 const MULTI_LINE_LOD_TOTAL_MAX_BYTES: usize = 64 * 1024 * 1024;
+const DENSITY_OVERVIEW_MAX_CELLS_X: usize = 128;
+const DENSITY_OVERVIEW_MAX_CELLS_Y: usize = 64;
+const DENSITY_OVERVIEW_MAX_POINTS_PER_SERIES: usize = 32;
+const DENSITY_OVERVIEW_MIN_SEGMENTS_PER_SERIES: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CacheKey {
@@ -26,6 +31,8 @@ struct CacheKey {
     plot_y: u32,
     plot_w: u32,
     plot_h: u32,
+    series_len: u32,
+    series_fingerprint: u64,
     max_series: u32,
     max_total_segments: u32,
     max_points_per_series: u32,
@@ -44,6 +51,8 @@ impl CacheKey {
             plot_y: py.to_bits(),
             plot_w: pw.to_bits(),
             plot_h: ph.to_bits(),
+            series_len: model.series.len() as u32,
+            series_fingerprint: series_set_fingerprint(&model.series),
             max_series: model.style.max_series as u32,
             max_total_segments: model.style.max_total_segments as u32,
             max_points_per_series: model.style.max_points_per_series as u32,
@@ -130,6 +139,7 @@ pub struct MultiLineChartModel {
     lod_cache_identities: Vec<Option<SeriesIdentity>>,
     lod_cache_failed_budget: Vec<Option<usize>>,
     lod_cache_bytes: usize,
+    density_bins: Vec<u32>,
 
     brush_x: BrushX,
 
@@ -189,6 +199,7 @@ impl MultiLineChartModel {
             lod_cache_identities: std::iter::repeat_with(|| None).take(series_len).collect(),
             lod_cache_failed_budget: std::iter::repeat_with(|| None).take(series_len).collect(),
             lod_cache_bytes: 0,
+            density_bins: Vec::new(),
             brush_x: BrushX::default(),
             cached_key: None,
             cached_points_px: Vec::new(),
@@ -200,8 +211,97 @@ impl MultiLineChartModel {
         self.gap_dx = gap_dx;
     }
 
+    fn should_use_density_overview(&self, plot_w: f32) -> bool {
+        if plot_w <= 0.0 {
+            return false;
+        }
+
+        let plot_segment_budget = (plot_w.ceil() as usize).saturating_mul(16);
+        let per_series_segment_budget = self.style.max_total_segments / self.series.len().max(1);
+        self.series.len() > self.style.max_series
+            || (self.style.max_total_segments > plot_segment_budget
+                && per_series_segment_budget < DENSITY_OVERVIEW_MIN_SEGMENTS_PER_SERIES)
+    }
+
     fn plot_rect(&self, w: f32, h: f32) -> (f32, f32, f32, f32) {
         self.view.plot_rect(w, h)
+    }
+
+    fn sync_lod_caches_with_series_len(&mut self) {
+        if self.lod_caches.len() > self.series.len() {
+            for cache in self.lod_caches[self.series.len()..].iter().flatten() {
+                self.lod_cache_bytes = self.lod_cache_bytes.saturating_sub(cache.approx_bytes());
+            }
+            self.lod_caches.truncate(self.series.len());
+            self.lod_cache_identities.truncate(self.series.len());
+            self.lod_cache_failed_budget.truncate(self.series.len());
+        } else if self.lod_caches.len() < self.series.len() {
+            self.lod_caches.resize_with(self.series.len(), || None);
+            self.lod_cache_identities
+                .resize_with(self.series.len(), || None);
+            self.lod_cache_failed_budget
+                .resize_with(self.series.len(), || None);
+        }
+    }
+
+    fn render_density_overview(
+        &mut self,
+        ctx: &mut dyn DrawContext,
+        px: f32,
+        py: f32,
+        pw: f32,
+        ph: f32,
+    ) {
+        let bins_w = ((pw / 6.0).floor() as usize).clamp(8, DENSITY_OVERVIEW_MAX_CELLS_X);
+        let bins_h = ((ph / 6.0).floor() as usize).clamp(8, DENSITY_OVERVIEW_MAX_CELLS_Y);
+        self.density_bins.clear();
+        self.density_bins.resize(bins_w * bins_h, 0);
+
+        if !self.view.domain.is_valid() {
+            return;
+        }
+
+        let span_x = self.view.domain.x.span();
+        let span_y = self.view.domain.y.span();
+        let inv_x = 1.0 / span_x.max(1e-12);
+        let inv_y = 1.0 / span_y.max(1e-12);
+        let density_params = DownsampleParams {
+            max_points: DENSITY_OVERVIEW_MAX_POINTS_PER_SERIES,
+        };
+        let mut bins_max = 0u32;
+
+        for series in &self.series {
+            downsample_min_max(
+                series,
+                self.view.domain.x.min,
+                self.view.domain.x.max,
+                density_params,
+                &mut self.scratch_data,
+            );
+            for p in &self.scratch_data {
+                if !p.x.is_finite() || !p.y.is_finite() {
+                    continue;
+                }
+                let tx = ((p.x - self.view.domain.x.min) * inv_x).clamp(0.0, 0.999_999);
+                let ty = ((p.y - self.view.domain.y.min) * inv_y).clamp(0.0, 0.999_999);
+                let ix = (tx * bins_w as f32) as usize;
+                let iy = (ty * bins_h as f32) as usize;
+                let idx = iy * bins_w + ix;
+                if let Some(v) = self.density_bins.get_mut(idx) {
+                    *v = v.saturating_add(1);
+                    bins_max = bins_max.max(*v);
+                }
+            }
+        }
+
+        draw_density_bins(
+            ctx,
+            &self.density_bins,
+            bins_w,
+            bins_h,
+            bins_max,
+            Rect::new(px, py, pw, ph),
+        );
     }
 
     fn query_series_lod_into_scratch(
@@ -212,14 +312,7 @@ impl MultiLineChartModel {
         x_max: f32,
         max_points: usize,
     ) -> bool {
-        if self.lod_caches.len() < self.series.len() {
-            self.lod_caches
-                .resize_with(self.series.len(), || None);
-            self.lod_cache_identities
-                .resize_with(self.series.len(), || None);
-            self.lod_cache_failed_budget
-                .resize_with(self.series.len(), || None);
-        }
+        self.sync_lod_caches_with_series_len();
 
         let identity = SeriesIdentity::new(&self.series[index]);
         if self.lod_cache_identities[index] != Some(identity) {
@@ -236,6 +329,8 @@ impl MultiLineChartModel {
         if raw_visible <= max_points.saturating_add(8) {
             return false;
         }
+        let raw_start = self.series[index].lower_bound_x(x_min);
+        let raw_end = self.series[index].upper_bound_x(x_max);
 
         if self.lod_caches[index].is_none() {
             let remaining_budget =
@@ -276,6 +371,17 @@ impl MultiLineChartModel {
             self.scratch_data.reserve(needed - self.scratch_data.capacity());
         }
         cache.query_into(x_min, x_max, max_points, &mut self.scratch_data);
+        let raw_first_x = self.series[index].x.get(raw_start).copied();
+        let raw_last_x = raw_end
+            .checked_sub(1)
+            .and_then(|idx| self.series[index].x.get(idx))
+            .copied();
+        let keeps_edges = self.scratch_data.first().map(|p| p.x) == raw_first_x
+            && self.scratch_data.last().map(|p| p.x) == raw_last_x;
+        if !keeps_edges {
+            self.scratch_data.clear();
+            return false;
+        }
         self.scratch_data.len() >= 2
     }
 
@@ -414,6 +520,10 @@ impl MultiLineChartModel {
         }
 
         crate::common::draw_grid(ctx, px, py, pw, ph, self.style.grid, 4);
+        if self.should_use_density_overview(pw) {
+            self.render_density_overview(ctx, px, py, pw, ph);
+            return;
+        }
 
         self.ensure_cached_geometry(w, h);
         if self.cached_runs.is_empty() {
@@ -444,6 +554,7 @@ impl MultiLineChartModel {
             return;
         }
 
+        self.sync_lod_caches_with_series_len();
         let key = CacheKey::new(self, plot);
         if self.cached_key == Some(key) {
             return;
@@ -695,6 +806,19 @@ fn plot_damage(prev_domain: Domain1D, next_domain: Domain1D) -> ChartDamage {
     }
 }
 
+fn series_set_fingerprint(series: &[TimeSeriesF32]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for s in series {
+        hash ^= s.x.as_ptr() as u64;
+        hash = hash.wrapping_mul(0x1000_0000_01b3);
+        hash ^= s.y.as_ptr() as u64;
+        hash = hash.wrapping_mul(0x1000_0000_01b3);
+        hash ^= s.len() as u64;
+        hash = hash.wrapping_mul(0x1000_0000_01b3);
+    }
+    hash
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -731,6 +855,28 @@ mod tests {
     }
 
     #[test]
+    fn multi_line_switches_to_density_mode_when_series_budget_is_exceeded() {
+        let series: Vec<TimeSeriesF32> = (0..10_000)
+            .map(|_| TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 0.0]).unwrap())
+            .collect();
+        let model = MultiLineChartModel::new(series).unwrap();
+
+        assert!(model.should_use_density_overview(1280.0));
+    }
+
+    #[test]
+    fn multi_line_switches_to_density_mode_when_segment_budget_is_exceeded() {
+        let series: Vec<TimeSeriesF32> = (0..600)
+            .map(|_| TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 0.0]).unwrap())
+            .collect();
+        let mut model = MultiLineChartModel::new(series).unwrap();
+        model.style.max_series = usize::MAX;
+        model.style.max_total_segments = 3_000;
+
+        assert!(model.should_use_density_overview(128.0));
+    }
+
+    #[test]
     fn render_plot_handles_series_appended_after_construction() {
         let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
         let mut model = MultiLineChartModel::new(vec![series.clone()]).unwrap();
@@ -742,6 +888,34 @@ mod tests {
         }));
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn render_plot_invalidates_cached_geometry_after_series_append() {
+        let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
+        let mut model = MultiLineChartModel::new(vec![series.clone()]).unwrap();
+        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+
+        model.render_plot(&mut ctx, 320.0, 200.0);
+        model.series.push(series);
+        model.render_plot(&mut ctx, 320.0, 200.0);
+
+        assert!(model.cached_runs.iter().any(|run| run.series_index == 1));
+    }
+
+    #[test]
+    fn render_plot_truncates_lod_state_when_series_shrinks() {
+        let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
+        let mut model = MultiLineChartModel::new(vec![series.clone(), series]).unwrap();
+        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+
+        model.render_plot(&mut ctx, 320.0, 200.0);
+        model.series.pop();
+        model.render_plot(&mut ctx, 320.0, 200.0);
+
+        assert_eq!(model.lod_caches.len(), 1);
+        assert_eq!(model.lod_cache_identities.len(), 1);
+        assert_eq!(model.lod_cache_failed_budget.len(), 1);
     }
 }
 

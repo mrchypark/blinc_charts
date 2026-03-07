@@ -388,10 +388,9 @@ impl LineChartModel {
 
         self.downsampled
             .reserve(point_budget.saturating_add(8).saturating_sub(self.downsampled.capacity()));
-        let raw_visible = self
-            .series
-            .upper_bound_x(self.view.domain.x.max)
-            .saturating_sub(self.series.lower_bound_x(self.view.domain.x.min));
+        let raw_start = self.series.lower_bound_x(self.view.domain.x.min);
+        let raw_end = self.series.upper_bound_x(self.view.domain.x.max);
+        let raw_visible = raw_end.saturating_sub(raw_start);
         if raw_visible > point_budget.saturating_add(8) {
             self.lod_cache.query_into(
                 self.view.domain.x.min,
@@ -399,6 +398,16 @@ impl LineChartModel {
                 point_budget,
                 &mut self.downsampled,
             );
+            let raw_first_x = self.series.x.get(raw_start).copied();
+            let raw_last_x = raw_end
+                .checked_sub(1)
+                .and_then(|idx| self.series.x.get(idx))
+                .copied();
+            let keeps_edges = self.downsampled.first().map(|p| p.x) == raw_first_x
+                && self.downsampled.last().map(|p| p.x) == raw_last_x;
+            if !keeps_edges {
+                self.downsampled.clear();
+            }
         }
         if self.downsampled.len() < 2 {
             downsample_min_max(

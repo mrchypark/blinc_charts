@@ -292,21 +292,6 @@ impl DensityMapChartModel {
         Some((a, b))
     }
 
-    fn color_map(&self, t: f32) -> Color {
-        let t = t.clamp(0.0, 1.0);
-        let (r, g, b) = if t < 0.33 {
-            let u = t / 0.33;
-            (0.10, 0.30 + 0.50 * u, 0.95)
-        } else if t < 0.66 {
-            let u = (t - 0.33) / 0.33;
-            (0.10 + 0.85 * u, 0.80, 0.95 - 0.75 * u)
-        } else {
-            let u = (t - 0.66) / 0.34;
-            (0.95, 0.80 - 0.65 * u, 0.20)
-        };
-        Color::rgba(r, g, b, 1.0)
-    }
-
     fn ensure_bins(&mut self, w: f32, h: f32) {
         let (_px, _py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
@@ -368,29 +353,14 @@ impl DensityMapChartModel {
         if self.bins_w == 0 || self.bins_h == 0 {
             return;
         }
-
-        let cell_w = (pw / self.bins_w as f32).max(1.0);
-        let cell_h = (ph / self.bins_h as f32).max(1.0);
-
-        let maxv = self.bins_max.max(1);
-        let inv_log = 1.0 / ((maxv as f32 + 1.0).ln()).max(1e-6);
-
-        for iy in 0..self.bins_h {
-            for ix in 0..self.bins_w {
-                let c = self.bins[iy * self.bins_w + ix];
-                if c == 0 {
-                    continue;
-                }
-                let t = ((c as f32 + 1.0).ln()) * inv_log;
-                let x = px + ix as f32 * cell_w;
-                let y = py + iy as f32 * cell_h;
-                ctx.fill_rect(
-                    Rect::new(x, y, cell_w + 0.5, cell_h + 0.5),
-                    0.0.into(),
-                    Brush::Solid(self.color_map(t)),
-                );
-            }
-        }
+        draw_density_bins(
+            ctx,
+            &self.bins,
+            self.bins_w,
+            self.bins_h,
+            self.bins_max,
+            Rect::new(px, py, pw, ph),
+        );
     }
 
     pub fn render_overlay(&self, ctx: &mut dyn DrawContext, w: f32, h: f32) {
@@ -438,6 +408,56 @@ impl DensityMapChartModel {
                 0.0.into(),
                 &Stroke::new(1.0),
                 Brush::Solid(Color::rgba(0.85, 0.92, 1.0, 0.35)),
+            );
+        }
+    }
+}
+
+pub(crate) fn density_color_map(t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    let (r, g, b) = if t < 0.33 {
+        let u = t / 0.33;
+        (0.10, 0.30 + 0.50 * u, 0.95)
+    } else if t < 0.66 {
+        let u = (t - 0.33) / 0.33;
+        (0.10 + 0.85 * u, 0.80, 0.95 - 0.75 * u)
+    } else {
+        let u = (t - 0.66) / 0.34;
+        (0.95, 0.80 - 0.65 * u, 0.20)
+    };
+    Color::rgba(r, g, b, 1.0)
+}
+
+pub(crate) fn draw_density_bins(
+    ctx: &mut dyn DrawContext,
+    bins: &[u32],
+    bins_w: usize,
+    bins_h: usize,
+    bins_max: u32,
+    plot: Rect,
+) {
+    if bins_w == 0 || bins_h == 0 || bins_max == 0 {
+        return;
+    }
+
+    let cell_w = (plot.width() / bins_w as f32).max(1.0);
+    let cell_h = (plot.height() / bins_h as f32).max(1.0);
+    let maxv = bins_max.max(1);
+    let inv_log = 1.0 / ((maxv as f32 + 1.0).ln()).max(1e-6);
+
+    for iy in 0..bins_h {
+        for ix in 0..bins_w {
+            let c = bins[iy * bins_w + ix];
+            if c == 0 {
+                continue;
+            }
+            let t = ((c as f32 + 1.0).ln()) * inv_log;
+            let x = plot.x() + ix as f32 * cell_w;
+            let y = plot.y() + iy as f32 * cell_h;
+            ctx.fill_rect(
+                Rect::new(x, y, cell_w + 0.5, cell_h + 0.5),
+                0.0.into(),
+                Brush::Solid(density_color_map(t)),
             );
         }
     }
