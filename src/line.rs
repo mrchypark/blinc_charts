@@ -10,26 +10,37 @@ use crate::brush::BrushX;
 use crate::format::format_compact;
 use crate::link::ChartLinkHandle;
 use crate::lod::{downsample_min_max, DownsampleParams};
+use crate::lod_cache::{SeriesIdentity, SeriesLodCache};
 use crate::time_format::format_time_or_number;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
 use crate::xy_stack::{ChartDamage, InteractiveXChartModel};
 
+const LINE_LOD_MIN_BUCKET: usize = 32;
+const LINE_LOD_MAX_LEVELS: usize = 8;
+const LINE_LOD_MAX_BYTES: usize = 8 * 1024 * 1024;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SampleKey {
     x_min: u32,
     x_max: u32,
+    y_min: u32,
+    y_max: u32,
     plot_w: u32,
     plot_h: u32,
+    max_points: u32,
 }
 
 impl SampleKey {
-    fn new(x_min: f32, x_max: f32, plot_w: f32, plot_h: f32) -> Self {
+    fn new(model: &LineChartModel, plot_w: f32, plot_h: f32, max_points: usize) -> Self {
         Self {
-            x_min: x_min.to_bits(),
-            x_max: x_max.to_bits(),
+            x_min: model.view.domain.x.min.to_bits(),
+            x_max: model.view.domain.x.max.to_bits(),
+            y_min: model.view.domain.y.min.to_bits(),
+            y_max: model.view.domain.y.max.to_bits(),
             plot_w: plot_w.to_bits(),
             plot_h: plot_h.to_bits(),
+            max_points: max_points as u32,
         }
     }
 }
@@ -120,6 +131,8 @@ pub struct LineChartModel {
     points_px: Vec<Point>,   // screen coords (local)
     downsample_params: DownsampleParams,
     user_max_points: usize,
+    lod_cache: SeriesLodCache,
+    lod_cache_identity: SeriesIdentity,
 
     // Cache key for (re)sampling. Hover-only interactions should not force
     // downsampling or point transforms on every frame.
@@ -148,6 +161,13 @@ impl LineChartModel {
             }
         }
         let domain = Domain2D::new(Domain1D::new(x0, x1), Domain1D::new(y0, y1));
+        let lod_cache = SeriesLodCache::build(
+            &series,
+            LINE_LOD_MIN_BUCKET,
+            LINE_LOD_MAX_LEVELS,
+            LINE_LOD_MAX_BYTES,
+        );
+        let lod_cache_identity = SeriesIdentity::new(&series);
         Self {
             series,
             view: ChartView::new(domain),
@@ -158,6 +178,8 @@ impl LineChartModel {
             points_px: Vec::new(),
             downsample_params: DownsampleParams::default(),
             user_max_points: DownsampleParams::default().max_points,
+            lod_cache,
+            lod_cache_identity,
             last_sample_key: None,
             axis_cache: AxisCache::default(),
             last_drag_total_x: None,
@@ -167,6 +189,23 @@ impl LineChartModel {
 
     pub fn set_downsample_max_points(&mut self, max_points: usize) {
         self.user_max_points = max_points.max(64);
+        self.last_sample_key = None;
+    }
+
+    fn ensure_lod_cache_fresh(&mut self) {
+        let identity = SeriesIdentity::new(&self.series);
+        if self.lod_cache_identity == identity {
+            return;
+        }
+
+        self.lod_cache = SeriesLodCache::build(
+            &self.series,
+            LINE_LOD_MIN_BUCKET,
+            LINE_LOD_MAX_LEVELS,
+            LINE_LOD_MAX_BYTES,
+        );
+        self.lod_cache_identity = identity;
+        self.last_sample_key = None;
     }
 
     fn plot_rect(&self, w: f32, h: f32) -> (f32, f32, f32, f32) {
@@ -330,6 +369,7 @@ impl LineChartModel {
     }
 
     fn ensure_samples(&mut self, w: f32, h: f32) {
+        self.ensure_lod_cache_fresh();
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
             self.downsampled.clear();
@@ -338,22 +378,37 @@ impl LineChartModel {
             return;
         }
 
-        let key = SampleKey::new(self.view.domain.x.min, self.view.domain.x.max, pw, ph);
+        let max_points = (pw.ceil() as usize).saturating_mul(2).clamp(128, 200_000);
+        self.downsample_params.max_points = self.user_max_points.min(max_points);
+        let point_budget = self.downsample_params.max_points;
+        let key = SampleKey::new(self, pw, ph, point_budget);
         if self.last_sample_key == Some(key) {
             return;
         }
 
-        // Keep output bounded by pixels (2 points per pixel column is plenty).
-        let max_points = (pw.ceil() as usize).saturating_mul(2).clamp(128, 200_000);
-        self.downsample_params.max_points = self.user_max_points.min(max_points);
-
-        downsample_min_max(
-            &self.series,
-            self.view.domain.x.min,
-            self.view.domain.x.max,
-            self.downsample_params,
-            &mut self.downsampled,
-        );
+        self.downsampled
+            .reserve(point_budget.saturating_add(8).saturating_sub(self.downsampled.capacity()));
+        let raw_visible = self
+            .series
+            .upper_bound_x(self.view.domain.x.max)
+            .saturating_sub(self.series.lower_bound_x(self.view.domain.x.min));
+        if raw_visible > point_budget.saturating_add(8) {
+            self.lod_cache.query_into(
+                self.view.domain.x.min,
+                self.view.domain.x.max,
+                point_budget,
+                &mut self.downsampled,
+            );
+        }
+        if self.downsampled.len() < 2 {
+            downsample_min_max(
+                &self.series,
+                self.view.domain.x.min,
+                self.view.domain.x.max,
+                self.downsample_params,
+                &mut self.downsampled,
+            );
+        }
 
         // Ensure at least 2 points for drawing.
         if self.downsampled.len() == 1 {
@@ -639,6 +694,7 @@ fn plot_damage(prev_domain: Domain1D, next_domain: Domain1D) -> ChartDamage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::view::Domain1D;
     use crate::xy_stack::ChartDamage;
 
     #[test]
@@ -662,5 +718,20 @@ mod tests {
 
         let updated = AxisCacheKey::new(&model, plot);
         assert_ne!(initial, updated);
+    }
+
+    #[test]
+    fn ensure_samples_uses_raw_points_for_small_visible_windows() {
+        let x: Vec<f32> = (0..256).map(|i| i as f32).collect();
+        let y: Vec<f32> = x.iter().map(|v| v.sin()).collect();
+        let series = TimeSeriesF32::new(x, y).unwrap();
+        let mut model = LineChartModel::new(series);
+        model.view.domain.x = Domain1D::new(100.0, 110.0);
+
+        model.ensure_samples(320.0, 200.0);
+
+        assert_eq!(model.downsampled.len(), 11);
+        assert_eq!(model.downsampled.first().unwrap().x, 100.0);
+        assert_eq!(model.downsampled.last().unwrap().x, 110.0);
     }
 }

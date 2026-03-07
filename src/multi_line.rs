@@ -6,15 +6,22 @@ use blinc_layout::ElementBuilder;
 use crate::brush::BrushX;
 use crate::link::ChartLinkHandle;
 use crate::lod::{downsample_min_max, DownsampleParams};
+use crate::lod_cache::{SeriesIdentity, SeriesLodCache};
 use crate::segments::runs_by_gap;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
 use crate::xy_stack::{ChartDamage, InteractiveXChartModel};
 
+const MULTI_LINE_LOD_MIN_BUCKET: usize = 32;
+const MULTI_LINE_LOD_MAX_LEVELS: usize = 8;
+const MULTI_LINE_LOD_TOTAL_MAX_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CacheKey {
     x_min: u32,
     x_max: u32,
+    y_min: u32,
+    y_max: u32,
     plot_x: u32,
     plot_y: u32,
     plot_w: u32,
@@ -31,6 +38,8 @@ impl CacheKey {
         Self {
             x_min: model.view.domain.x.min.to_bits(),
             x_max: model.view.domain.x.max.to_bits(),
+            y_min: model.view.domain.y.min.to_bits(),
+            y_max: model.view.domain.y.max.to_bits(),
             plot_x: px.to_bits(),
             plot_y: py.to_bits(),
             plot_w: pw.to_bits(),
@@ -117,6 +126,10 @@ pub struct MultiLineChartModel {
     scratch_px: Vec<Point>,   // local px coords
     scratch_runs: Vec<(usize, usize)>,
     downsample_params: DownsampleParams,
+    lod_caches: Vec<Option<SeriesLodCache>>,
+    lod_cache_identities: Vec<Option<SeriesIdentity>>,
+    lod_cache_failed_budget: Vec<Option<usize>>,
+    lod_cache_bytes: usize,
 
     brush_x: BrushX,
 
@@ -160,6 +173,7 @@ impl MultiLineChartModel {
         }
 
         let domain = Domain2D::new(Domain1D::new(x_min, x_max), Domain1D::new(y_min, y_max));
+        let series_len = series.len();
         Ok(Self {
             series,
             view: ChartView::new(domain),
@@ -171,6 +185,10 @@ impl MultiLineChartModel {
             scratch_px: Vec::new(),
             scratch_runs: Vec::new(),
             downsample_params: DownsampleParams::default(),
+            lod_caches: std::iter::repeat_with(|| None).take(series_len).collect(),
+            lod_cache_identities: std::iter::repeat_with(|| None).take(series_len).collect(),
+            lod_cache_failed_budget: std::iter::repeat_with(|| None).take(series_len).collect(),
+            lod_cache_bytes: 0,
             brush_x: BrushX::default(),
             cached_key: None,
             cached_points_px: Vec::new(),
@@ -184,6 +202,81 @@ impl MultiLineChartModel {
 
     fn plot_rect(&self, w: f32, h: f32) -> (f32, f32, f32, f32) {
         self.view.plot_rect(w, h)
+    }
+
+    fn query_series_lod_into_scratch(
+        &mut self,
+        index: usize,
+        visible_series: usize,
+        x_min: f32,
+        x_max: f32,
+        max_points: usize,
+    ) -> bool {
+        if self.lod_caches.len() < self.series.len() {
+            self.lod_caches
+                .resize_with(self.series.len(), || None);
+            self.lod_cache_identities
+                .resize_with(self.series.len(), || None);
+            self.lod_cache_failed_budget
+                .resize_with(self.series.len(), || None);
+        }
+
+        let identity = SeriesIdentity::new(&self.series[index]);
+        if self.lod_cache_identities[index] != Some(identity) {
+            if let Some(cache) = self.lod_caches[index].take() {
+                self.lod_cache_bytes = self.lod_cache_bytes.saturating_sub(cache.approx_bytes());
+            }
+            self.lod_cache_identities[index] = Some(identity);
+            self.lod_cache_failed_budget[index] = None;
+        }
+
+        let raw_visible = self.series[index]
+            .upper_bound_x(x_max)
+            .saturating_sub(self.series[index].lower_bound_x(x_min));
+        if raw_visible <= max_points.saturating_add(8) {
+            return false;
+        }
+
+        if self.lod_caches[index].is_none() {
+            let remaining_budget =
+                MULTI_LINE_LOD_TOTAL_MAX_BYTES.saturating_sub(self.lod_cache_bytes);
+            let remaining_series = visible_series.saturating_sub(index).max(1);
+            let per_series_budget = remaining_budget / remaining_series;
+            if per_series_budget == 0 {
+                return false;
+            }
+            if self.lod_cache_failed_budget[index]
+                .is_some_and(|failed_budget| per_series_budget <= failed_budget)
+            {
+                return false;
+            }
+
+            let cache = SeriesLodCache::build(
+                &self.series[index],
+                MULTI_LINE_LOD_MIN_BUCKET,
+                MULTI_LINE_LOD_MAX_LEVELS,
+                per_series_budget,
+            );
+            let approx_bytes = cache.approx_bytes();
+            if approx_bytes == 0 {
+                self.lod_cache_failed_budget[index] = Some(per_series_budget);
+                return false;
+            }
+
+            self.lod_cache_bytes = self.lod_cache_bytes.saturating_add(approx_bytes);
+            self.lod_caches[index] = Some(cache);
+            self.lod_cache_failed_budget[index] = None;
+        }
+
+        let Some(cache) = self.lod_caches[index].as_ref() else {
+            return false;
+        };
+        let needed = max_points.saturating_add(8);
+        if self.scratch_data.capacity() < needed {
+            self.scratch_data.reserve(needed - self.scratch_data.capacity());
+        }
+        cache.query_into(x_min, x_max, max_points, &mut self.scratch_data);
+        self.scratch_data.len() >= 2
     }
 
     pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) -> ChartDamage {
@@ -366,13 +459,15 @@ impl MultiLineChartModel {
         }
 
         let mut remaining_segments = self.style.max_total_segments.max(1);
+        let x_min = self.view.domain.x.min;
+        let x_max = self.view.domain.x.max;
 
         // Per-series point cap: also bounded by pixels so we don't waste work.
         let px_cap = (pw.ceil() as usize).saturating_mul(2).clamp(64, 200_000);
         let hard_per_series_cap = self.style.max_points_per_series.max(2).min(px_cap);
         let affine = self.view.plot_affine(px, py, pw, ph);
 
-        for (si, s) in self.series.iter().take(n).enumerate() {
+        for si in 0..n {
             if remaining_segments == 0 {
                 break;
             }
@@ -382,14 +477,17 @@ impl MultiLineChartModel {
             let seg_budget = (remaining_segments / remaining_series).max(8);
             let point_budget = (seg_budget + 1).clamp(2, hard_per_series_cap);
 
-            self.downsample_params.max_points = point_budget;
-            downsample_min_max(
-                s,
-                self.view.domain.x.min,
-                self.view.domain.x.max,
-                self.downsample_params,
-                &mut self.scratch_data,
-            );
+            let used_cache = self.query_series_lod_into_scratch(si, n, x_min, x_max, point_budget);
+            if !used_cache {
+                self.downsample_params.max_points = point_budget;
+                downsample_min_max(
+                    &self.series[si],
+                    x_min,
+                    x_max,
+                    self.downsample_params,
+                    &mut self.scratch_data,
+                );
+            }
 
             if self.scratch_data.len() < 2 {
                 continue;
@@ -630,6 +728,20 @@ mod tests {
         let damage = model.on_scroll(40.0, 120.0, 320.0, 200.0);
 
         assert_eq!(damage, ChartDamage::Plot);
+    }
+
+    #[test]
+    fn render_plot_handles_series_appended_after_construction() {
+        let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
+        let mut model = MultiLineChartModel::new(vec![series.clone()]).unwrap();
+        model.series.push(series);
+
+        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            model.render_plot(&mut ctx, 320.0, 200.0);
+        }));
+
+        assert!(result.is_ok());
     }
 }
 
