@@ -118,6 +118,37 @@ impl SeriesLodCache {
     }
 }
 
+pub(crate) fn stitch_visible_edges(
+    series: &TimeSeriesF32,
+    start: usize,
+    end: usize,
+    out: &mut Vec<Point>,
+) {
+    if start >= end || end > series.len() {
+        out.clear();
+        return;
+    }
+
+    let first = series.point(start);
+    let last = series.point(end - 1);
+
+    if out.is_empty() {
+        out.push(first);
+        if last != first {
+            out.push(last);
+        }
+        return;
+    }
+
+    if out.first().is_some_and(|p| *p != first) {
+        out.insert(0, first);
+    }
+    if out.last().is_some_and(|p| *p != last) {
+        out.push(last);
+    }
+    out.dedup_by(|a, b| a.x == b.x && a.y == b.y);
+}
+
 fn build_level(series: &TimeSeriesF32, bucket_size: usize) -> Vec<Point> {
     if series.is_empty() {
         return Vec::new();
@@ -201,7 +232,7 @@ mod tests {
 
     use crate::TimeSeriesF32;
 
-    use super::SeriesLodCache;
+    use super::{stitch_visible_edges, SeriesLodCache};
 
     #[test]
     fn lod_cache_query_is_ordered_and_bounded() {
@@ -255,5 +286,19 @@ mod tests {
 
         assert!(cache.approx_bytes() <= 512);
         assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn stitch_visible_edges_adds_missing_endpoints() {
+        let x: Vec<f32> = (0..512).map(|i| i as f32).collect();
+        let y = x.clone();
+        let series = TimeSeriesF32::new(x, y).unwrap();
+        let mut out = vec![Point::new(160.0, 160.0), Point::new(192.0, 192.0)];
+
+        stitch_visible_edges(&series, 129, 220, &mut out);
+
+        assert_eq!(out.first().map(|p| p.x), Some(129.0));
+        assert_eq!(out.last().map(|p| p.x), Some(219.0));
+        assert!(out.windows(2).all(|w| w[0].x <= w[1].x));
     }
 }

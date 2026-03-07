@@ -10,7 +10,7 @@ use crate::brush::BrushX;
 use crate::format::format_compact;
 use crate::link::ChartLinkHandle;
 use crate::lod::{downsample_min_max, DownsampleParams};
-use crate::lod_cache::{SeriesIdentity, SeriesLodCache};
+use crate::lod_cache::{stitch_visible_edges, SeriesIdentity, SeriesLodCache};
 use crate::time_format::format_time_or_number;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
@@ -398,15 +398,8 @@ impl LineChartModel {
                 point_budget,
                 &mut self.downsampled,
             );
-            let raw_first_x = self.series.x.get(raw_start).copied();
-            let raw_last_x = raw_end
-                .checked_sub(1)
-                .and_then(|idx| self.series.x.get(idx))
-                .copied();
-            let keeps_edges = self.downsampled.first().map(|p| p.x) == raw_first_x
-                && self.downsampled.last().map(|p| p.x) == raw_last_x;
-            if !keeps_edges {
-                self.downsampled.clear();
+            if !self.downsampled.is_empty() {
+                stitch_visible_edges(&self.series, raw_start, raw_end, &mut self.downsampled);
             }
         }
         if self.downsampled.len() < 2 {

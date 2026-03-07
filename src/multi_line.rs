@@ -7,7 +7,7 @@ use crate::brush::BrushX;
 use crate::density_map::draw_density_bins;
 use crate::link::ChartLinkHandle;
 use crate::lod::{downsample_min_max, DownsampleParams};
-use crate::lod_cache::{SeriesIdentity, SeriesLodCache};
+use crate::lod_cache::{stitch_visible_edges, SeriesIdentity, SeriesLodCache};
 use crate::segments::runs_by_gap;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
@@ -371,16 +371,13 @@ impl MultiLineChartModel {
             self.scratch_data.reserve(needed - self.scratch_data.capacity());
         }
         cache.query_into(x_min, x_max, max_points, &mut self.scratch_data);
-        let raw_first_x = self.series[index].x.get(raw_start).copied();
-        let raw_last_x = raw_end
-            .checked_sub(1)
-            .and_then(|idx| self.series[index].x.get(idx))
-            .copied();
-        let keeps_edges = self.scratch_data.first().map(|p| p.x) == raw_first_x
-            && self.scratch_data.last().map(|p| p.x) == raw_last_x;
-        if !keeps_edges {
-            self.scratch_data.clear();
-            return false;
+        if !self.scratch_data.is_empty() {
+            stitch_visible_edges(
+                &self.series[index],
+                raw_start,
+                raw_end,
+                &mut self.scratch_data,
+            );
         }
         self.scratch_data.len() >= 2
     }
