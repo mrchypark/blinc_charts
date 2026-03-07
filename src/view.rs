@@ -64,6 +64,51 @@ impl Domain2D {
     }
 }
 
+/// Precomputed affine mapping from data space into plot-local pixel space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlotAffine {
+    x_domain_origin: f64,
+    x_px_origin: f64,
+    x_scale: f64,
+    y_domain_origin: f64,
+    y_px_origin: f64,
+    y_scale: f64,
+}
+
+impl PlotAffine {
+    pub fn new(domain: Domain2D, plot_x: f32, plot_y: f32, plot_w: f32, plot_h: f32) -> Self {
+        Self {
+            x_domain_origin: domain.x.min as f64,
+            x_px_origin: plot_x as f64,
+            x_scale: axis_scale(domain.x.min, domain.x.max, plot_w),
+            y_domain_origin: domain.y.min as f64,
+            y_px_origin: (plot_y + plot_h) as f64,
+            y_scale: axis_scale(domain.y.min, domain.y.max, -plot_h),
+        }
+    }
+
+    pub fn map_x(&self, x: f32) -> f32 {
+        ((x as f64 - self.x_domain_origin) * self.x_scale + self.x_px_origin) as f32
+    }
+
+    pub fn map_y(&self, y: f32) -> f32 {
+        ((y as f64 - self.y_domain_origin) * self.y_scale + self.y_px_origin) as f32
+    }
+
+    pub fn map_point(&self, p: Point) -> Point {
+        Point::new(self.map_x(p.x), self.map_y(p.y))
+    }
+}
+
+fn axis_scale(domain_min: f32, domain_max: f32, range_span: f32) -> f64 {
+    let domain_span = (domain_max - domain_min) as f64;
+    if domain_span.abs() < 1e-12 {
+        0.0
+    } else {
+        range_span as f64 / domain_span
+    }
+}
+
 /// View transform for a chart: data domain mapping to local pixel space.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChartView {
@@ -88,6 +133,10 @@ impl ChartView {
         let w = (width - left - right).max(0.0);
         let h = (height - top - bottom).max(0.0);
         (left, top, w, h)
+    }
+
+    pub fn plot_affine(&self, plot_x: f32, plot_y: f32, plot_w: f32, plot_h: f32) -> PlotAffine {
+        PlotAffine::new(self.domain, plot_x, plot_y, plot_w, plot_h)
     }
 
     pub fn x_to_px(&self, x: f32, plot_x: f32, plot_w: f32) -> f32 {
@@ -145,5 +194,44 @@ impl ChartView {
             self.x_to_px(p.x, plot_x, plot_w),
             self.y_to_px(p.y, plot_y, plot_h),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() <= 1e-4,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn plot_affine_matches_existing_point_mapping() {
+        let view = ChartView {
+            domain: Domain2D::new(
+                Domain1D::new(1_700_000_000.0, 1_700_086_400.0),
+                Domain1D::new(-125.5, 987.25),
+            ),
+            padding: [0.0; 4],
+        };
+        let (plot_x, plot_y, plot_w, plot_h) = (12.0, 24.0, 640.0, 320.0);
+        let affine = view.plot_affine(plot_x, plot_y, plot_w, plot_h);
+        let points = [
+            Point::new(view.domain.x.min, view.domain.y.min),
+            Point::new(view.domain.x.max, view.domain.y.max),
+            Point::new(1_700_021_600.0, -20.25),
+            Point::new(1_700_043_200.0, 512.0),
+            Point::new(1_700_064_800.0, 900.5),
+        ];
+
+        for point in points {
+            let legacy = view.data_to_px(point, plot_x, plot_y, plot_w, plot_h);
+            let mapped = affine.map_point(point);
+            assert_close(mapped.x, legacy.x);
+            assert_close(mapped.y, legacy.y);
+        }
     }
 }

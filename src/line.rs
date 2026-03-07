@@ -11,7 +11,7 @@ use crate::lod::{downsample_min_max, DownsampleParams};
 use crate::time_format::format_time_or_number;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
-use crate::xy_stack::InteractiveXChartModel;
+use crate::xy_stack::{ChartDamage, InteractiveXChartModel};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SampleKey {
@@ -126,18 +126,30 @@ impl LineChartModel {
         self.view.plot_rect(w, h)
     }
 
-    pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
+    pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_crosshair = self.crosshair_x;
+        let prev_hover = self.hover_point;
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
             self.crosshair_x = None;
             self.hover_point = None;
-            return;
+            return overlay_damage(
+                prev_crosshair,
+                prev_hover,
+                self.crosshair_x,
+                self.hover_point,
+            );
         }
 
         if local_x < px || local_x > px + pw || local_y < py || local_y > py + ph {
             self.crosshair_x = None;
             self.hover_point = None;
-            return;
+            return overlay_damage(
+                prev_crosshair,
+                prev_hover,
+                self.crosshair_x,
+                self.hover_point,
+            );
         }
 
         self.crosshair_x = Some(local_x);
@@ -146,12 +158,19 @@ impl LineChartModel {
             .series
             .nearest_by_x(x)
             .map(|(_i, xx, yy)| Point::new(xx, yy));
+        overlay_damage(
+            prev_crosshair,
+            prev_hover,
+            self.crosshair_x,
+            self.hover_point,
+        )
     }
 
-    pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
+    pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_domain = self.view.domain.x;
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         let cursor_x_px = cursor_x_px.clamp(px, px + pw);
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
@@ -167,12 +186,14 @@ impl LineChartModel {
 
         // Prevent collapsing to 0 span.
         self.view.domain.x.clamp_span_min(1e-6);
+        plot_damage(prev_domain, self.view.domain.x)
     }
 
-    pub fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
+    pub fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_domain = self.view.domain.x;
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         let cursor_x_px = cursor_x_px.clamp(px, px + pw);
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
@@ -181,13 +202,15 @@ impl LineChartModel {
         let zoom = scale_delta.max(self.style.pinch_zoom_min);
         self.view.domain.x.zoom_about(pivot_x, zoom);
         self.view.domain.x.clamp_span_min(1e-6);
+        plot_damage(prev_domain, self.view.domain.x)
     }
 
     /// Pan using drag "total delta from start" (EventContext::drag_delta_x).
-    pub fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+    pub fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_domain = self.view.domain.x;
         let (_px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
 
         // Convert total-from-start to incremental delta since last event.
@@ -200,38 +223,51 @@ impl LineChartModel {
         // Convert pixel delta to domain delta.
         let dx = -drag_dx / pw * self.view.domain.x.span();
         self.view.domain.x.pan_by(dx);
+        plot_damage(prev_domain, self.view.domain.x)
     }
 
     pub fn on_drag_end(&mut self) {
         self.last_drag_total_x = None;
     }
 
-    pub fn on_mouse_down(&mut self, shift: bool, local_x: f32, w: f32, h: f32) {
+    pub fn on_mouse_down(&mut self, shift: bool, local_x: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_range = self.brush_x.range_px();
         if !shift {
-            return;
+            return ChartDamage::None;
         }
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         self.brush_x.begin(local_x.clamp(px, px + pw));
         self.last_drag_total_x = None;
+        if self.brush_x.range_px() != prev_range {
+            ChartDamage::Overlay
+        } else {
+            ChartDamage::None
+        }
     }
 
-    pub fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+    pub fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_range = self.brush_x.range_px();
         if !self.brush_x.is_active() {
-            return;
+            return ChartDamage::None;
         }
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         // Brush updates track cursor position. DRAG provides delta-from-start, so infer current x.
         let Some(start_x) = self.brush_x.anchor_px() else {
-            return;
+            return ChartDamage::None;
         };
         let x = start_x + drag_total_dx;
         self.brush_x.update(x.clamp(px, px + pw));
+        if self.brush_x.range_px() != prev_range {
+            ChartDamage::Overlay
+        } else {
+            ChartDamage::None
+        }
     }
 
     pub fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
@@ -280,9 +316,9 @@ impl LineChartModel {
         // Convert to local pixel points once.
         self.points_px.clear();
         self.points_px.reserve(self.downsampled.len());
+        let affine = self.view.plot_affine(px, py, pw, ph);
         for p in &self.downsampled {
-            self.points_px
-                .push(self.view.data_to_px(*p, px, py, pw, ph));
+            self.points_px.push(affine.map_point(*p));
         }
 
         self.last_sample_key = Some(key);
@@ -383,27 +419,57 @@ impl LineChartModel {
 
 impl InteractiveXChartModel for LineChartModel {
     fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
-        LineChartModel::on_mouse_move(self, local_x, local_y, w, h);
+        let _ = LineChartModel::on_mouse_move(self, local_x, local_y, w, h);
+    }
+
+    fn mouse_move_damage(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) -> ChartDamage {
+        LineChartModel::on_mouse_move(self, local_x, local_y, w, h)
     }
 
     fn on_mouse_down(&mut self, brush_modifier: bool, local_x: f32, w: f32, h: f32) {
-        LineChartModel::on_mouse_down(self, brush_modifier, local_x, w, h);
+        let _ = LineChartModel::on_mouse_down(self, brush_modifier, local_x, w, h);
+    }
+
+    fn mouse_down_damage(
+        &mut self,
+        brush_modifier: bool,
+        local_x: f32,
+        w: f32,
+        h: f32,
+    ) -> ChartDamage {
+        LineChartModel::on_mouse_down(self, brush_modifier, local_x, w, h)
     }
 
     fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
-        LineChartModel::on_scroll(self, delta_y, cursor_x_px, w, h);
+        let _ = LineChartModel::on_scroll(self, delta_y, cursor_x_px, w, h);
+    }
+
+    fn scroll_damage(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        LineChartModel::on_scroll(self, delta_y, cursor_x_px, w, h)
     }
 
     fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
-        LineChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h);
+        let _ = LineChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h);
+    }
+
+    fn pinch_damage(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        LineChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h)
     }
 
     fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
-        LineChartModel::on_drag_pan_total(self, drag_total_dx, w, h);
+        let _ = LineChartModel::on_drag_pan_total(self, drag_total_dx, w, h);
+    }
+
+    fn drag_pan_damage(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        LineChartModel::on_drag_pan_total(self, drag_total_dx, w, h)
     }
 
     fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
-        LineChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h);
+        let _ = LineChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h);
+    }
+
+    fn drag_brush_damage(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        LineChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h)
     }
 
     fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
@@ -491,4 +557,41 @@ pub fn linked_line_chart_with_bindings(
     bindings: crate::ChartInputBindings,
 ) -> impl ElementBuilder {
     crate::xy_stack::linked_x_chart(handle.0, link, bindings)
+}
+
+fn overlay_damage(
+    prev_crosshair: Option<f32>,
+    prev_hover: Option<Point>,
+    next_crosshair: Option<f32>,
+    next_hover: Option<Point>,
+) -> ChartDamage {
+    if prev_crosshair != next_crosshair || prev_hover != next_hover {
+        ChartDamage::Overlay
+    } else {
+        ChartDamage::None
+    }
+}
+
+fn plot_damage(prev_domain: Domain1D, next_domain: Domain1D) -> ChartDamage {
+    if prev_domain != next_domain {
+        ChartDamage::Plot
+    } else {
+        ChartDamage::None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::xy_stack::ChartDamage;
+
+    #[test]
+    fn mouse_move_inside_plot_returns_overlay_damage() {
+        let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
+        let mut model = LineChartModel::new(series);
+
+        let damage = model.on_mouse_move(120.0, 40.0, 320.0, 200.0);
+
+        assert_eq!(damage, ChartDamage::Overlay);
+    }
 }

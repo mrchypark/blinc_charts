@@ -55,6 +55,7 @@ pub use lod::{downsample_min_max, DownsampleParams};
 pub use segments::runs_by_gap;
 pub use time_series::TimeSeriesF32;
 pub use view::{ChartView, Domain1D, Domain2D};
+pub use xy_stack::ChartDamage;
 
 /// Common imports for chart users.
 pub mod prelude {

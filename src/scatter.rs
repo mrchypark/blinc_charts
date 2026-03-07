@@ -14,7 +14,7 @@ use crate::time_format::format_time_or_number;
 use crate::time_series::TimeSeriesF32;
 use crate::triangulation::triangulate_fan;
 use crate::view::{ChartView, Domain1D, Domain2D};
-use crate::xy_stack::InteractiveXChartModel;
+use crate::xy_stack::{ChartDamage, InteractiveXChartModel};
 
 const MESH_TRIANGULATION_POINT_LIMIT: usize = 512;
 
@@ -130,17 +130,29 @@ impl ScatterChartModel {
         self.view.plot_rect(w, h)
     }
 
-    pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
+    pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_crosshair = self.crosshair_x;
+        let prev_hover = self.hover_point;
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
             self.crosshair_x = None;
             self.hover_point = None;
-            return;
+            return overlay_damage(
+                prev_crosshair,
+                prev_hover,
+                self.crosshair_x,
+                self.hover_point,
+            );
         }
         if local_x < px || local_x > px + pw || local_y < py || local_y > py + ph {
             self.crosshair_x = None;
             self.hover_point = None;
-            return;
+            return overlay_damage(
+                prev_crosshair,
+                prev_hover,
+                self.crosshair_x,
+                self.hover_point,
+            );
         }
         self.ensure_samples(w, h);
         self.crosshair_x = Some(local_x);
@@ -158,12 +170,19 @@ impl ScatterChartModel {
                 .nearest_by_x(x)
                 .map(|(_i, xx, yy)| Point::new(xx, yy));
         }
+        overlay_damage(
+            prev_crosshair,
+            prev_hover,
+            self.crosshair_x,
+            self.hover_point,
+        )
     }
 
-    pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
+    pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_domain = self.view.domain.x;
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         let cursor_x_px = cursor_x_px.clamp(px, px + pw);
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
@@ -171,24 +190,28 @@ impl ScatterChartModel {
         let zoom = (-delta_y * self.style.scroll_zoom_factor).exp();
         self.view.domain.x.zoom_about(pivot_x, zoom);
         self.view.domain.x.clamp_span_min(1e-6);
+        plot_damage(prev_domain, self.view.domain.x)
     }
 
-    pub fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
+    pub fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_domain = self.view.domain.x;
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         let cursor_x_px = cursor_x_px.clamp(px, px + pw);
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
         let zoom = scale_delta.max(self.style.pinch_zoom_min);
         self.view.domain.x.zoom_about(pivot_x, zoom);
         self.view.domain.x.clamp_span_min(1e-6);
+        plot_damage(prev_domain, self.view.domain.x)
     }
 
-    pub fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+    pub fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_domain = self.view.domain.x;
         let (_px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         let prev = self.last_drag_total_x.replace(drag_total_dx);
         let drag_dx = match prev {
@@ -197,36 +220,41 @@ impl ScatterChartModel {
         };
         let dx = -drag_dx / pw * self.view.domain.x.span();
         self.view.domain.x.pan_by(dx);
+        plot_damage(prev_domain, self.view.domain.x)
     }
 
     pub fn on_drag_end(&mut self) {
         self.last_drag_total_x = None;
     }
 
-    pub fn on_mouse_down(&mut self, shift: bool, local_x: f32, w: f32, h: f32) {
+    pub fn on_mouse_down(&mut self, shift: bool, local_x: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_range = self.brush_x.range_px();
         if !shift {
-            return;
+            return ChartDamage::None;
         }
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         self.brush_x.begin(local_x.clamp(px, px + pw));
         self.last_drag_total_x = None;
+        overlay_range_damage(prev_range, self.brush_x.range_px())
     }
 
-    pub fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+    pub fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_range = self.brush_x.range_px();
         if !self.brush_x.is_active() {
-            return;
+            return ChartDamage::None;
         }
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         if let Some(anchor) = self.brush_x.anchor_px() {
             self.brush_x
                 .update((anchor + drag_total_dx).clamp(px, px + pw));
         }
+        overlay_range_damage(prev_range, self.brush_x.range_px())
     }
 
     pub fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
@@ -272,8 +300,9 @@ impl ScatterChartModel {
         self.points_px.clear();
         self.points_px
             .reserve(self.downsampled.len().min(max_points));
+        let affine = self.view.plot_affine(px, py, pw, ph);
         for p in &self.downsampled {
-            let pp = self.view.data_to_px(*p, px, py, pw, ph);
+            let pp = affine.map_point(*p);
             self.points_px.push(pp);
         }
         self.spatial_index = Some(SpatialIndex::build(&self.points_px, 24, 24));
@@ -360,27 +389,57 @@ impl ScatterChartModel {
 
 impl InteractiveXChartModel for ScatterChartModel {
     fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
-        ScatterChartModel::on_mouse_move(self, local_x, local_y, w, h);
+        let _ = ScatterChartModel::on_mouse_move(self, local_x, local_y, w, h);
+    }
+
+    fn mouse_move_damage(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) -> ChartDamage {
+        ScatterChartModel::on_mouse_move(self, local_x, local_y, w, h)
     }
 
     fn on_mouse_down(&mut self, brush_modifier: bool, local_x: f32, w: f32, h: f32) {
-        ScatterChartModel::on_mouse_down(self, brush_modifier, local_x, w, h);
+        let _ = ScatterChartModel::on_mouse_down(self, brush_modifier, local_x, w, h);
+    }
+
+    fn mouse_down_damage(
+        &mut self,
+        brush_modifier: bool,
+        local_x: f32,
+        w: f32,
+        h: f32,
+    ) -> ChartDamage {
+        ScatterChartModel::on_mouse_down(self, brush_modifier, local_x, w, h)
     }
 
     fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
-        ScatterChartModel::on_scroll(self, delta_y, cursor_x_px, w, h);
+        let _ = ScatterChartModel::on_scroll(self, delta_y, cursor_x_px, w, h);
+    }
+
+    fn scroll_damage(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        ScatterChartModel::on_scroll(self, delta_y, cursor_x_px, w, h)
     }
 
     fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
-        ScatterChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h);
+        let _ = ScatterChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h);
+    }
+
+    fn pinch_damage(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        ScatterChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h)
     }
 
     fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
-        ScatterChartModel::on_drag_pan_total(self, drag_total_dx, w, h);
+        let _ = ScatterChartModel::on_drag_pan_total(self, drag_total_dx, w, h);
+    }
+
+    fn drag_pan_damage(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        ScatterChartModel::on_drag_pan_total(self, drag_total_dx, w, h)
     }
 
     fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
-        ScatterChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h);
+        let _ = ScatterChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h);
+    }
+
+    fn drag_brush_damage(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        ScatterChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h)
     }
 
     fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
@@ -455,9 +514,42 @@ pub fn linked_scatter_chart_with_bindings(
     crate::xy_stack::linked_x_chart(handle.0, link, bindings)
 }
 
+fn overlay_damage(
+    prev_crosshair: Option<f32>,
+    prev_hover: Option<Point>,
+    next_crosshair: Option<f32>,
+    next_hover: Option<Point>,
+) -> ChartDamage {
+    if prev_crosshair != next_crosshair || prev_hover != next_hover {
+        ChartDamage::Overlay
+    } else {
+        ChartDamage::None
+    }
+}
+
+fn overlay_range_damage(
+    prev_range: Option<(f32, f32)>,
+    next_range: Option<(f32, f32)>,
+) -> ChartDamage {
+    if prev_range != next_range {
+        ChartDamage::Overlay
+    } else {
+        ChartDamage::None
+    }
+}
+
+fn plot_damage(prev_domain: Domain1D, next_domain: Domain1D) -> ChartDamage {
+    if prev_domain != next_domain {
+        ChartDamage::Plot
+    } else {
+        ChartDamage::None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xy_stack::ChartDamage;
     use blinc_core::{RecordingContext, Size};
 
     #[test]
@@ -472,5 +564,20 @@ mod tests {
         }));
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn repeated_outside_mouse_move_returns_no_damage() {
+        let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
+        let mut model = ScatterChartModel::new(series);
+
+        assert_eq!(
+            model.on_mouse_move(-10.0, -10.0, 320.0, 200.0),
+            ChartDamage::None
+        );
+        assert_eq!(
+            model.on_mouse_move(-10.0, -10.0, 320.0, 200.0),
+            ChartDamage::None
+        );
     }
 }

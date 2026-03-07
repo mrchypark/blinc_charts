@@ -9,7 +9,7 @@ use crate::lod::{downsample_min_max, DownsampleParams};
 use crate::segments::runs_by_gap;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
-use crate::xy_stack::InteractiveXChartModel;
+use crate::xy_stack::{ChartDamage, InteractiveXChartModel};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct CacheKey {
@@ -186,23 +186,26 @@ impl MultiLineChartModel {
         self.view.plot_rect(w, h)
     }
 
-    pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
+    pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_crosshair = self.crosshair_x;
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
             self.crosshair_x = None;
-            return;
+            return overlay_damage(prev_crosshair, self.crosshair_x);
         }
         if local_x < px || local_x > px + pw || local_y < py || local_y > py + ph {
             self.crosshair_x = None;
-            return;
+            return overlay_damage(prev_crosshair, self.crosshair_x);
         }
         self.crosshair_x = Some(local_x);
+        overlay_damage(prev_crosshair, self.crosshair_x)
     }
 
-    pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
+    pub fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_domain = self.view.domain.x;
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         let cursor_x_px = cursor_x_px.clamp(px, px + pw);
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
@@ -211,12 +214,14 @@ impl MultiLineChartModel {
         let zoom = (-delta_y * self.style.scroll_zoom_factor).exp();
         self.view.domain.x.zoom_about(pivot_x, zoom);
         self.view.domain.x.clamp_span_min(1e-6);
+        plot_damage(prev_domain, self.view.domain.x)
     }
 
-    pub fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
+    pub fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_domain = self.view.domain.x;
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         let cursor_x_px = cursor_x_px.clamp(px, px + pw);
         let pivot_x = self.view.px_to_x(cursor_x_px, px, pw);
@@ -224,13 +229,15 @@ impl MultiLineChartModel {
         let zoom = scale_delta.max(self.style.pinch_zoom_min);
         self.view.domain.x.zoom_about(pivot_x, zoom);
         self.view.domain.x.clamp_span_min(1e-6);
+        plot_damage(prev_domain, self.view.domain.x)
     }
 
     /// Pan using drag "total delta from start" (EventContext::drag_delta_x).
-    pub fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+    pub fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_domain = self.view.domain.x;
         let (_px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         // Convert total-from-start to incremental delta since last event.
         let prev = self.last_drag_total_x.replace(drag_total_dx);
@@ -242,37 +249,42 @@ impl MultiLineChartModel {
         // Convert pixel delta to domain delta.
         let dx = -drag_dx / pw * self.view.domain.x.span();
         self.view.domain.x.pan_by(dx);
+        plot_damage(prev_domain, self.view.domain.x)
     }
 
     pub fn on_drag_end(&mut self) {
         self.last_drag_total_x = None;
     }
 
-    pub fn on_mouse_down(&mut self, shift: bool, local_x: f32, w: f32, h: f32) {
+    pub fn on_mouse_down(&mut self, shift: bool, local_x: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_range = self.brush_x.range_px();
         if !shift {
-            return;
+            return ChartDamage::None;
         }
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         self.brush_x.begin(local_x.clamp(px, px + pw));
         self.last_drag_total_x = None;
+        overlay_range_damage(prev_range, self.brush_x.range_px())
     }
 
-    pub fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
+    pub fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        let prev_range = self.brush_x.range_px();
         if !self.brush_x.is_active() {
-            return;
+            return ChartDamage::None;
         }
         let (px, _py, pw, _ph) = self.plot_rect(w, h);
         if pw <= 0.0 {
-            return;
+            return ChartDamage::None;
         }
         let Some(start_x) = self.brush_x.anchor_px() else {
-            return;
+            return ChartDamage::None;
         };
         let x = start_x + drag_total_dx;
         self.brush_x.update(x.clamp(px, px + pw));
+        overlay_range_damage(prev_range, self.brush_x.range_px())
     }
 
     pub fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
@@ -358,6 +370,7 @@ impl MultiLineChartModel {
         // Per-series point cap: also bounded by pixels so we don't waste work.
         let px_cap = (pw.ceil() as usize).saturating_mul(2).clamp(64, 200_000);
         let hard_per_series_cap = self.style.max_points_per_series.max(2).min(px_cap);
+        let affine = self.view.plot_affine(px, py, pw, ph);
 
         for (si, s) in self.series.iter().take(n).enumerate() {
             if remaining_segments == 0 {
@@ -386,8 +399,7 @@ impl MultiLineChartModel {
             self.scratch_px.clear();
             self.scratch_px.reserve(self.scratch_data.len());
             for p in &self.scratch_data {
-                self.scratch_px
-                    .push(self.view.data_to_px(*p, px, py, pw, ph));
+                self.scratch_px.push(affine.map_point(*p));
             }
 
             // Split runs on missing data gaps.
@@ -468,27 +480,57 @@ impl MultiLineChartModel {
 
 impl InteractiveXChartModel for MultiLineChartModel {
     fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
-        MultiLineChartModel::on_mouse_move(self, local_x, local_y, w, h);
+        let _ = MultiLineChartModel::on_mouse_move(self, local_x, local_y, w, h);
+    }
+
+    fn mouse_move_damage(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) -> ChartDamage {
+        MultiLineChartModel::on_mouse_move(self, local_x, local_y, w, h)
     }
 
     fn on_mouse_down(&mut self, brush_modifier: bool, local_x: f32, w: f32, h: f32) {
-        MultiLineChartModel::on_mouse_down(self, brush_modifier, local_x, w, h);
+        let _ = MultiLineChartModel::on_mouse_down(self, brush_modifier, local_x, w, h);
+    }
+
+    fn mouse_down_damage(
+        &mut self,
+        brush_modifier: bool,
+        local_x: f32,
+        w: f32,
+        h: f32,
+    ) -> ChartDamage {
+        MultiLineChartModel::on_mouse_down(self, brush_modifier, local_x, w, h)
     }
 
     fn on_scroll(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) {
-        MultiLineChartModel::on_scroll(self, delta_y, cursor_x_px, w, h);
+        let _ = MultiLineChartModel::on_scroll(self, delta_y, cursor_x_px, w, h);
+    }
+
+    fn scroll_damage(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        MultiLineChartModel::on_scroll(self, delta_y, cursor_x_px, w, h)
     }
 
     fn on_pinch(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) {
-        MultiLineChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h);
+        let _ = MultiLineChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h);
+    }
+
+    fn pinch_damage(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        MultiLineChartModel::on_pinch(self, scale_delta, cursor_x_px, w, h)
     }
 
     fn on_drag_pan_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
-        MultiLineChartModel::on_drag_pan_total(self, drag_total_dx, w, h);
+        let _ = MultiLineChartModel::on_drag_pan_total(self, drag_total_dx, w, h);
+    }
+
+    fn drag_pan_damage(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        MultiLineChartModel::on_drag_pan_total(self, drag_total_dx, w, h)
     }
 
     fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) {
-        MultiLineChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h);
+        let _ = MultiLineChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h);
+    }
+
+    fn drag_brush_damage(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        MultiLineChartModel::on_drag_brush_x_total(self, drag_total_dx, w, h)
     }
 
     fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
@@ -528,9 +570,37 @@ impl InteractiveXChartModel for MultiLineChartModel {
     }
 }
 
+fn overlay_damage(prev_crosshair: Option<f32>, next_crosshair: Option<f32>) -> ChartDamage {
+    if prev_crosshair != next_crosshair {
+        ChartDamage::Overlay
+    } else {
+        ChartDamage::None
+    }
+}
+
+fn overlay_range_damage(
+    prev_range: Option<(f32, f32)>,
+    next_range: Option<(f32, f32)>,
+) -> ChartDamage {
+    if prev_range != next_range {
+        ChartDamage::Overlay
+    } else {
+        ChartDamage::None
+    }
+}
+
+fn plot_damage(prev_domain: Domain1D, next_domain: Domain1D) -> ChartDamage {
+    if prev_domain != next_domain {
+        ChartDamage::Plot
+    } else {
+        ChartDamage::None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xy_stack::ChartDamage;
     use blinc_core::{RecordingContext, Size};
 
     #[test]
@@ -550,6 +620,16 @@ mod tests {
         }));
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn scroll_returns_plot_damage() {
+        let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
+        let mut model = MultiLineChartModel::new(vec![series]).unwrap();
+
+        let damage = model.on_scroll(40.0, 120.0, 320.0, 200.0);
+
+        assert_eq!(damage, ChartDamage::Plot);
     }
 }
 

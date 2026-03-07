@@ -23,3 +23,10 @@ blinc_layout = { git = "https://github.com/mrchypark/Blinc.git", branch = "main"
 anyhow = "1.0"
 rustc-hash = "2.0"
 tracing = "0.1"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "line_render"
+harness = false
