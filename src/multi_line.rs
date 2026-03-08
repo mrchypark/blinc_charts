@@ -286,7 +286,7 @@ impl MultiLineChartModel {
                     continue;
                 }
                 let tx = ((p.x - self.view.domain.x.min) * inv_x).clamp(0.0, 0.999_999);
-                let ty = ((p.y - self.view.domain.y.min) * inv_y).clamp(0.0, 0.999_999);
+                let ty = (1.0 - (p.y - self.view.domain.y.min) * inv_y).clamp(0.0, 0.999_999);
                 let ix = (tx * bins_w as f32) as usize;
                 let iy = (ty * bins_h as f32) as usize;
                 let idx = iy * bins_w + ix;
@@ -867,6 +867,20 @@ mod tests {
         model.style.max_total_segments = 3_000;
 
         assert!(model.should_use_density_overview(128.0));
+    }
+
+    #[test]
+    fn density_overview_maps_low_y_to_bottom_row() {
+        let series = TimeSeriesF32::new(vec![0.5, 0.5], vec![0.0, 10.0]).unwrap();
+        let mut model = MultiLineChartModel::new(vec![series]).unwrap();
+        model.view.domain = Domain2D::new(Domain1D::new(0.0, 1.0), Domain1D::new(0.0, 10.0));
+
+        let mut ctx = RecordingContext::new(Size::new(64.0, 64.0));
+        model.render_density_overview(&mut ctx, 0.0, 0.0, 48.0, 48.0);
+
+        assert_eq!(model.density_bins.len(), 64);
+        assert_eq!(model.density_bins[4], 1);
+        assert_eq!(model.density_bins[7 * 8 + 4], 1);
     }
 
     #[test]
