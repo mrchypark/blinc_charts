@@ -140,10 +140,22 @@ pub(crate) fn stitch_visible_edges(
         return;
     }
 
-    if out.first().is_some_and(|p| *p != first) {
-        out.insert(0, first);
+    let prepend_first = out.first().is_some_and(|p| *p != first);
+    let append_last = out.last().is_some_and(|p| *p != last);
+
+    if prepend_first {
+        let mut stitched = Vec::with_capacity(out.len() + 1 + usize::from(append_last));
+        stitched.push(first);
+        stitched.extend_from_slice(out);
+        if append_last {
+            stitched.push(last);
+        }
+        stitched.dedup_by(|a, b| a.x == b.x && a.y == b.y);
+        *out = stitched;
+        return;
     }
-    if out.last().is_some_and(|p| *p != last) {
+
+    if append_last {
         out.push(last);
     }
     out.dedup_by(|a, b| a.x == b.x && a.y == b.y);
