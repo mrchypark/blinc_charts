@@ -7,14 +7,20 @@ use blinc_core::Point;
 /// Assumptions for performance:
 /// - `x` is sorted ascending
 /// - `x.len() == y.len()`
+/// - callers treat the series as an immutable snapshot; replace the series
+///   when data changes instead of mutating the backing storage in place
 #[derive(Clone, Debug)]
 pub struct TimeSeriesF32 {
-    pub x: Arc<[f32]>,
-    pub y: Arc<[f32]>,
+    pub(crate) x: Arc<[f32]>,
+    pub(crate) y: Arc<[f32]>,
 }
 
 impl TimeSeriesF32 {
     pub fn new(x: Vec<f32>, y: Vec<f32>) -> anyhow::Result<Self> {
+        Self::from_arcs(x.into(), y.into())
+    }
+
+    pub fn from_arcs(x: Arc<[f32]>, y: Arc<[f32]>) -> anyhow::Result<Self> {
         anyhow::ensure!(!x.is_empty(), "x cannot be empty");
         anyhow::ensure!(x.len() == y.len(), "x/y length mismatch");
         anyhow::ensure!(
@@ -29,6 +35,14 @@ impl TimeSeriesF32 {
 
     pub fn len(&self) -> usize {
         self.x.len()
+    }
+
+    pub fn x_values(&self) -> &[f32] {
+        &self.x
+    }
+
+    pub fn y_values(&self) -> &[f32] {
+        &self.y
     }
 
     pub fn is_empty(&self) -> bool {
@@ -135,5 +149,17 @@ mod tests {
         let y = vec![f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
         let s = TimeSeriesF32::new(x, y).unwrap();
         assert_eq!(s.y_min_max(), (f32::INFINITY, f32::NEG_INFINITY));
+    }
+
+    #[test]
+    fn from_arcs_preserves_shared_storage_and_accessors() {
+        let x: Arc<[f32]> = vec![0.0, 1.0, 2.0].into();
+        let y: Arc<[f32]> = vec![3.0, 4.0, 5.0].into();
+        let s = TimeSeriesF32::from_arcs(x.clone(), y.clone()).unwrap();
+
+        assert_eq!(s.x_values(), &*x);
+        assert_eq!(s.y_values(), &*y);
+        assert!(std::ptr::eq(s.x_values().as_ptr(), x.as_ptr()));
+        assert!(std::ptr::eq(s.y_values().as_ptr(), y.as_ptr()));
     }
 }

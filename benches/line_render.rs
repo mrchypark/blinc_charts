@@ -71,10 +71,7 @@ fn build_dense_multi_line_model(
             y.push(wave + envelope + ripple + baseline);
         }
 
-        series.push(TimeSeriesF32 {
-            x: x.clone(),
-            y: y.into(),
-        });
+        series.push(TimeSeriesF32::from_arcs(x.clone(), y.into()).expect("shared dense series"));
     }
 
     let mut model = MultiLineChartModel::new(series).expect("dense multi-line model");
