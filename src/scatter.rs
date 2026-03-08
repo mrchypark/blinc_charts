@@ -14,7 +14,7 @@ use crate::time_format::format_time_or_number;
 use crate::time_series::TimeSeriesF32;
 use crate::triangulation::triangulate_fan;
 use crate::view::{ChartView, Domain1D, Domain2D};
-use crate::xy_stack::{ChartDamage, InteractiveXChartModel};
+use crate::xy_stack::{plot_damage, ChartDamage, InteractiveXChartModel};
 
 const MESH_TRIANGULATION_POINT_LIMIT: usize = 512;
 
@@ -533,14 +533,6 @@ fn overlay_range_damage(
 ) -> ChartDamage {
     if prev_range != next_range {
         ChartDamage::Overlay
-    } else {
-        ChartDamage::None
-    }
-}
-
-fn plot_damage(prev_domain: Domain1D, next_domain: Domain1D) -> ChartDamage {
-    if prev_domain != next_domain {
-        ChartDamage::Plot
     } else {
         ChartDamage::None
     }

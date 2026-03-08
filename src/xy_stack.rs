@@ -8,7 +8,7 @@ use blinc_layout::ElementBuilder;
 
 use crate::input::{ChartInputBindings, DragAction};
 use crate::link::ChartLinkHandle;
-use crate::view::ChartView;
+use crate::view::{ChartView, Domain1D};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChartDamage {
@@ -20,6 +20,14 @@ pub enum ChartDamage {
 impl ChartDamage {
     pub(crate) fn needs_redraw(self) -> bool {
         !matches!(self, Self::None)
+    }
+}
+
+pub(crate) fn plot_damage(prev_domain: Domain1D, next_domain: Domain1D) -> ChartDamage {
+    if prev_domain != next_domain {
+        ChartDamage::Plot
+    } else {
+        ChartDamage::None
     }
 }
 
@@ -72,13 +80,7 @@ pub(crate) trait InteractiveXChartModel: Send + 'static {
         ChartDamage::Plot
     }
 
-    fn pinch_damage(
-        &mut self,
-        scale_delta: f32,
-        cursor_x_px: f32,
-        w: f32,
-        h: f32,
-    ) -> ChartDamage {
+    fn pinch_damage(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
         self.on_pinch(scale_delta, cursor_x_px, w, h);
         ChartDamage::Plot
     }
@@ -241,7 +243,9 @@ pub(crate) fn x_chart<M: InteractiveXChartModel>(
                 };
                 let damage = match action {
                     DragAction::None => ChartDamage::None,
-                    DragAction::PanX => m.drag_pan_damage(e.drag_delta_x, e.bounds_width, e.bounds_height),
+                    DragAction::PanX => {
+                        m.drag_pan_damage(e.drag_delta_x, e.bounds_width, e.bounds_height)
+                    }
                     DragAction::BrushX => {
                         m.drag_brush_damage(e.drag_delta_x, e.bounds_width, e.bounds_height)
                     }
@@ -388,7 +392,9 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
                         l.set_x_domain(m.view().domain.x);
                         damage
                     }
-                    DragAction::BrushX => m.drag_brush_damage(e.drag_delta_x, e.bounds_width, e.bounds_height),
+                    DragAction::BrushX => {
+                        m.drag_brush_damage(e.drag_delta_x, e.bounds_width, e.bounds_height)
+                    }
                 };
 
                 if damage.needs_redraw() {
@@ -446,4 +452,19 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
             .h_full()
             .foreground(),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{plot_damage, ChartDamage};
+    use crate::view::Domain1D;
+
+    #[test]
+    fn chart_damage_helpers_report_domain_changes() {
+        let domain = Domain1D::new(0.0, 10.0);
+        let shifted = Domain1D::new(1.0, 11.0);
+
+        assert_eq!(plot_damage(domain, domain), ChartDamage::None);
+        assert_eq!(plot_damage(domain, shifted), ChartDamage::Plot);
+    }
 }

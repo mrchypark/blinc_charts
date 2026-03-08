@@ -11,7 +11,7 @@ use crate::lod_cache::{stitch_visible_edges, SeriesIdentity, SeriesLodCache};
 use crate::segments::runs_by_gap;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
-use crate::xy_stack::{ChartDamage, InteractiveXChartModel};
+use crate::xy_stack::{plot_damage, ChartDamage, InteractiveXChartModel};
 
 const MULTI_LINE_LOD_MIN_BUCKET: usize = 32;
 const MULTI_LINE_LOD_MAX_LEVELS: usize = 8;
@@ -368,7 +368,8 @@ impl MultiLineChartModel {
         };
         let needed = max_points.saturating_add(8);
         if self.scratch_data.capacity() < needed {
-            self.scratch_data.reserve(needed - self.scratch_data.capacity());
+            self.scratch_data
+                .reserve(needed.saturating_sub(self.scratch_data.len()));
         }
         cache.query_into(x_min, x_max, max_points, &mut self.scratch_data);
         if !self.scratch_data.is_empty() {
@@ -790,14 +791,6 @@ fn overlay_range_damage(
 ) -> ChartDamage {
     if prev_range != next_range {
         ChartDamage::Overlay
-    } else {
-        ChartDamage::None
-    }
-}
-
-fn plot_damage(prev_domain: Domain1D, next_domain: Domain1D) -> ChartDamage {
-    if prev_domain != next_domain {
-        ChartDamage::Plot
     } else {
         ChartDamage::None
     }

@@ -14,7 +14,7 @@ use crate::lod_cache::{stitch_visible_edges, SeriesIdentity, SeriesLodCache};
 use crate::time_format::format_time_or_number;
 use crate::time_series::TimeSeriesF32;
 use crate::view::{ChartView, Domain1D, Domain2D};
-use crate::xy_stack::{ChartDamage, InteractiveXChartModel};
+use crate::xy_stack::{plot_damage, ChartDamage, InteractiveXChartModel};
 
 const LINE_LOD_MIN_BUCKET: usize = 32;
 const LINE_LOD_MAX_LEVELS: usize = 8;
@@ -327,11 +327,7 @@ impl LineChartModel {
         }
         self.brush_x.begin(local_x.clamp(px, px + pw));
         self.last_drag_total_x = None;
-        if self.brush_x.range_px() != prev_range {
-            ChartDamage::Overlay
-        } else {
-            ChartDamage::None
-        }
+        overlay_range_damage(prev_range, self.brush_x.range_px())
     }
 
     pub fn on_drag_brush_x_total(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
@@ -349,11 +345,7 @@ impl LineChartModel {
         };
         let x = start_x + drag_total_dx;
         self.brush_x.update(x.clamp(px, px + pw));
-        if self.brush_x.range_px() != prev_range {
-            ChartDamage::Overlay
-        } else {
-            ChartDamage::None
-        }
+        overlay_range_damage(prev_range, self.brush_x.range_px())
     }
 
     pub fn on_mouse_up_finish_brush_x(&mut self, w: f32, h: f32) -> Option<(f32, f32)> {
@@ -386,8 +378,8 @@ impl LineChartModel {
             return;
         }
 
-        self.downsampled
-            .reserve(point_budget.saturating_add(8).saturating_sub(self.downsampled.capacity()));
+        self.downsampled.clear();
+        self.downsampled.reserve(point_budget.saturating_add(8));
         let raw_start = self.series.lower_bound_x(self.view.domain.x.min);
         let raw_end = self.series.upper_bound_x(self.view.domain.x.max);
         let raw_visible = raw_end.saturating_sub(raw_start);
@@ -685,9 +677,12 @@ fn overlay_damage(
     }
 }
 
-fn plot_damage(prev_domain: Domain1D, next_domain: Domain1D) -> ChartDamage {
-    if prev_domain != next_domain {
-        ChartDamage::Plot
+fn overlay_range_damage(
+    prev_range: Option<(f32, f32)>,
+    next_range: Option<(f32, f32)>,
+) -> ChartDamage {
+    if prev_range != next_range {
+        ChartDamage::Overlay
     } else {
         ChartDamage::None
     }
@@ -735,5 +730,35 @@ mod tests {
         assert_eq!(model.downsampled.len(), 11);
         assert_eq!(model.downsampled.first().unwrap().x, 100.0);
         assert_eq!(model.downsampled.last().unwrap().x, 110.0);
+    }
+
+    #[test]
+    fn line_ensure_samples_refreshes_raw_visible_window() {
+        let x: Vec<f32> = (0..2_048).map(|i| i as f32).collect();
+        let y: Vec<f32> = x.iter().map(|v| (v * 0.01).sin()).collect();
+        let series = TimeSeriesF32::new(x, y).unwrap();
+        let mut model = LineChartModel::new(series);
+
+        model.ensure_samples(320.0, 200.0);
+        let wide_len = model.downsampled.len();
+        assert!(wide_len > 11);
+
+        model.view.domain.x = Domain1D::new(100.0, 110.0);
+        model.ensure_samples(320.0, 200.0);
+
+        assert_eq!(model.downsampled.len(), 11);
+        assert_eq!(model.points_px.len(), model.downsampled.len());
+        assert_eq!(model.downsampled.first().unwrap().x, 100.0);
+        assert_eq!(model.downsampled.last().unwrap().x, 110.0);
+        assert!(model.downsampled.len() < wide_len);
+    }
+
+    #[test]
+    fn overlay_range_damage_reports_range_changes() {
+        let range = Some((10.0, 20.0));
+        let changed = Some((10.0, 24.0));
+
+        assert_eq!(overlay_range_damage(range, range), ChartDamage::None);
+        assert_eq!(overlay_range_damage(range, changed), ChartDamage::Overlay);
     }
 }
