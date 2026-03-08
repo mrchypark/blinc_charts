@@ -41,8 +41,16 @@ impl TimeSeriesF32 {
         &self.x
     }
 
+    pub fn x_arc(&self) -> Arc<[f32]> {
+        self.x.clone()
+    }
+
     pub fn y_values(&self) -> &[f32] {
         &self.y
+    }
+
+    pub fn y_arc(&self) -> Arc<[f32]> {
+        self.y.clone()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -161,5 +169,7 @@ mod tests {
         assert_eq!(s.y_values(), &*y);
         assert!(std::ptr::eq(s.x_values().as_ptr(), x.as_ptr()));
         assert!(std::ptr::eq(s.y_values().as_ptr(), y.as_ptr()));
+        assert_eq!(s.x_arc().as_ptr(), x.as_ptr());
+        assert_eq!(s.y_arc().as_ptr(), y.as_ptr());
     }
 }
