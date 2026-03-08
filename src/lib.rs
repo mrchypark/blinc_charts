@@ -16,6 +16,7 @@ pub mod input;
 pub mod interpolate;
 mod link;
 mod lod;
+mod lod_cache;
 pub mod palette;
 pub mod polygon;
 pub mod scale;
@@ -52,9 +53,11 @@ pub use candlestick::{Candle, CandleSeries};
 pub use input::{ChartInputBindings, DragAction, DragBinding, ModifiersReq};
 pub use link::{chart_link, ChartLink, ChartLinkHandle};
 pub use lod::{downsample_min_max, DownsampleParams};
+pub use lod_cache::SeriesLodCache;
 pub use segments::runs_by_gap;
 pub use time_series::TimeSeriesF32;
 pub use view::{ChartView, Domain1D, Domain2D};
+pub use xy_stack::ChartDamage;
 
 /// Common imports for chart users.
 pub mod prelude {

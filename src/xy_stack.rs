@@ -8,7 +8,28 @@ use blinc_layout::ElementBuilder;
 
 use crate::input::{ChartInputBindings, DragAction};
 use crate::link::ChartLinkHandle;
-use crate::view::ChartView;
+use crate::view::{ChartView, Domain1D};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChartDamage {
+    None,
+    Overlay,
+    Plot,
+}
+
+impl ChartDamage {
+    pub(crate) fn needs_redraw(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
+pub(crate) fn plot_damage(prev_domain: Domain1D, next_domain: Domain1D) -> ChartDamage {
+    if prev_domain != next_domain {
+        ChartDamage::Plot
+    } else {
+        ChartDamage::None
+    }
+}
 
 /// Common behaviors for X-only interactive charts (time-series style).
 ///
@@ -33,6 +54,61 @@ pub(crate) trait InteractiveXChartModel: Send + 'static {
     fn crosshair_x_mut(&mut self) -> &mut Option<f32>;
 
     fn is_brushing(&self) -> bool;
+
+    fn mouse_move_damage(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) -> ChartDamage {
+        self.on_mouse_move(local_x, local_y, w, h);
+        ChartDamage::Overlay
+    }
+
+    fn mouse_down_damage(
+        &mut self,
+        brush_modifier: bool,
+        local_x: f32,
+        w: f32,
+        h: f32,
+    ) -> ChartDamage {
+        self.on_mouse_down(brush_modifier, local_x, w, h);
+        if brush_modifier {
+            ChartDamage::Overlay
+        } else {
+            ChartDamage::None
+        }
+    }
+
+    fn scroll_damage(&mut self, delta_y: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        self.on_scroll(delta_y, cursor_x_px, w, h);
+        ChartDamage::Plot
+    }
+
+    fn pinch_damage(&mut self, scale_delta: f32, cursor_x_px: f32, w: f32, h: f32) -> ChartDamage {
+        self.on_pinch(scale_delta, cursor_x_px, w, h);
+        ChartDamage::Plot
+    }
+
+    fn drag_pan_damage(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        self.on_drag_pan_total(drag_total_dx, w, h);
+        ChartDamage::Plot
+    }
+
+    fn drag_brush_damage(&mut self, drag_total_dx: f32, w: f32, h: f32) -> ChartDamage {
+        self.on_drag_brush_x_total(drag_total_dx, w, h);
+        if self.is_brushing() {
+            ChartDamage::Overlay
+        } else {
+            ChartDamage::None
+        }
+    }
+
+    fn mouse_up_damage(&mut self, w: f32, h: f32) -> (ChartDamage, Option<(f32, f32)>) {
+        let had_brush = self.is_brushing();
+        let selection = self.on_mouse_up_finish_brush_x(w, h);
+        let damage = if had_brush {
+            ChartDamage::Overlay
+        } else {
+            ChartDamage::None
+        };
+        (damage, selection)
+    }
 }
 
 fn drag_action(
@@ -120,8 +196,11 @@ pub(crate) fn x_chart<M: InteractiveXChartModel>(
         .cursor(CursorStyle::Crosshair)
         .on_mouse_move(move |e| {
             if let Ok(mut m) = model_move.lock() {
-                m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
+                let damage =
+                    m.mouse_move_damage(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .on_mouse_down(move |e| {
@@ -130,20 +209,29 @@ pub(crate) fn x_chart<M: InteractiveXChartModel>(
                     .brush_drag
                     .required
                     .matches(e.shift, e.ctrl, e.alt, e.meta);
-                m.on_mouse_down(brush_mod, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
+                let damage =
+                    m.mouse_down_damage(brush_mod, e.local_x, e.bounds_width, e.bounds_height);
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .on_scroll(move |e| {
             if let Ok(mut m) = model_scroll.lock() {
-                m.on_scroll(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
+                let damage =
+                    m.scroll_damage(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .on_pinch(move |e| {
             if let Ok(mut m) = model_pinch.lock() {
-                m.on_pinch(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
+                let damage =
+                    m.pinch_damage(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .on_drag(move |e| {
@@ -153,23 +241,27 @@ pub(crate) fn x_chart<M: InteractiveXChartModel>(
                 } else {
                     drag_action(bindings, e)
                 };
-                match action {
-                    DragAction::None => {}
+                let damage = match action {
+                    DragAction::None => ChartDamage::None,
                     DragAction::PanX => {
-                        m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height)
+                        m.drag_pan_damage(e.drag_delta_x, e.bounds_width, e.bounds_height)
                     }
                     DragAction::BrushX => {
-                        m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height)
+                        m.drag_brush_damage(e.drag_delta_x, e.bounds_width, e.bounds_height)
                     }
+                };
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
                 }
-                blinc_layout::stateful::request_redraw();
             }
         })
         .on_mouse_up(move |e| {
             if let Ok(mut m) = model_up.lock() {
-                let _ = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height);
+                let (damage, _selection) = m.mouse_up_damage(e.bounds_width, e.bounds_height);
                 m.on_drag_end();
-                blinc_layout::stateful::request_redraw();
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .on_drag_end(move |_e| {
@@ -231,17 +323,21 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
         .on_mouse_move(move |e| {
             if let (Ok(mut l), Ok(mut m)) = (link_move.lock(), model_move.lock()) {
                 m.view_mut().domain.x = l.x_domain;
-                m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
+                let damage =
+                    m.mouse_move_damage(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
 
                 // Publish hover x in domain units (or None when out of plot).
                 let (px, _py, pw, _ph) = m.plot_rect(e.bounds_width, e.bounds_height);
-                if pw > 0.0 && m.crosshair_x_mut().is_some() {
-                    let x = m.view().px_to_x(e.local_x.clamp(px, px + pw), px, pw);
-                    l.set_hover_x(Some(x));
+                let prev_hover = l.hover_x;
+                let next_hover = if pw > 0.0 && m.crosshair_x_mut().is_some() {
+                    Some(m.view().px_to_x(e.local_x.clamp(px, px + pw), px, pw))
                 } else {
-                    l.set_hover_x(None);
+                    None
+                };
+                l.set_hover_x(next_hover);
+                if damage.needs_redraw() || prev_hover != next_hover {
+                    blinc_layout::stateful::request_redraw();
                 }
-                blinc_layout::stateful::request_redraw();
             }
         })
         .on_mouse_down(move |e| {
@@ -250,24 +346,33 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
                     .brush_drag
                     .required
                     .matches(e.shift, e.ctrl, e.alt, e.meta);
-                m.on_mouse_down(brush_mod, e.local_x, e.bounds_width, e.bounds_height);
-                blinc_layout::stateful::request_redraw();
+                let damage =
+                    m.mouse_down_damage(brush_mod, e.local_x, e.bounds_width, e.bounds_height);
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .on_scroll(move |e| {
             if let (Ok(mut l), Ok(mut m)) = (link_scroll.lock(), model_scroll.lock()) {
                 m.view_mut().domain.x = l.x_domain;
-                m.on_scroll(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
+                let damage =
+                    m.scroll_damage(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
                 l.set_x_domain(m.view().domain.x);
-                blinc_layout::stateful::request_redraw();
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .on_pinch(move |e| {
             if let (Ok(mut l), Ok(mut m)) = (link_pinch.lock(), model_pinch.lock()) {
                 m.view_mut().domain.x = l.x_domain;
-                m.on_pinch(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
+                let damage =
+                    m.pinch_damage(e.pinch_scale, e.local_x, e.bounds_width, e.bounds_height);
                 l.set_x_domain(m.view().domain.x);
-                blinc_layout::stateful::request_redraw();
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .on_drag(move |e| {
@@ -279,28 +384,35 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
                     drag_action(bindings, e)
                 };
 
-                match action {
-                    DragAction::None => {}
+                let damage = match action {
+                    DragAction::None => ChartDamage::None,
                     DragAction::PanX => {
-                        m.on_drag_pan_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
+                        let damage =
+                            m.drag_pan_damage(e.drag_delta_x, e.bounds_width, e.bounds_height);
                         l.set_x_domain(m.view().domain.x);
+                        damage
                     }
                     DragAction::BrushX => {
-                        m.on_drag_brush_x_total(e.drag_delta_x, e.bounds_width, e.bounds_height);
+                        m.drag_brush_damage(e.drag_delta_x, e.bounds_width, e.bounds_height)
                     }
-                }
+                };
 
-                blinc_layout::stateful::request_redraw();
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .on_mouse_up(move |e| {
             if let (Ok(mut l), Ok(mut m)) = (link_up.lock(), model_up.lock()) {
                 m.view_mut().domain.x = l.x_domain;
-                if let Some(sel) = m.on_mouse_up_finish_brush_x(e.bounds_width, e.bounds_height) {
+                let (damage, selection) = m.mouse_up_damage(e.bounds_width, e.bounds_height);
+                if let Some(sel) = selection {
                     l.set_selection_x(Some(sel));
                 }
                 m.on_drag_end();
-                blinc_layout::stateful::request_redraw();
+                if damage.needs_redraw() {
+                    blinc_layout::stateful::request_redraw();
+                }
             }
         })
         .on_drag_end(move |_e| {
@@ -340,4 +452,19 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
             .h_full()
             .foreground(),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{plot_damage, ChartDamage};
+    use crate::view::Domain1D;
+
+    #[test]
+    fn chart_damage_helpers_report_domain_changes() {
+        let domain = Domain1D::new(0.0, 10.0);
+        let shifted = Domain1D::new(1.0, 11.0);
+
+        assert_eq!(plot_damage(domain, domain), ChartDamage::None);
+        assert_eq!(plot_damage(domain, shifted), ChartDamage::Plot);
+    }
 }
