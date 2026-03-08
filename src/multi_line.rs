@@ -18,6 +18,7 @@ const MULTI_LINE_LOD_MAX_LEVELS: usize = 8;
 const MULTI_LINE_LOD_TOTAL_MAX_BYTES: usize = 64 * 1024 * 1024;
 const DENSITY_OVERVIEW_MAX_CELLS_X: usize = 128;
 const DENSITY_OVERVIEW_MAX_CELLS_Y: usize = 64;
+const DENSITY_OVERVIEW_CELL_SIZE: f32 = 6.0;
 const DENSITY_OVERVIEW_MAX_POINTS_PER_SERIES: usize = 32;
 const DENSITY_OVERVIEW_MIN_SEGMENTS_PER_SERIES: usize = 8;
 
@@ -252,8 +253,10 @@ impl MultiLineChartModel {
         pw: f32,
         ph: f32,
     ) {
-        let bins_w = ((pw / 6.0).floor() as usize).clamp(8, DENSITY_OVERVIEW_MAX_CELLS_X);
-        let bins_h = ((ph / 6.0).floor() as usize).clamp(8, DENSITY_OVERVIEW_MAX_CELLS_Y);
+        let bins_w = ((pw / DENSITY_OVERVIEW_CELL_SIZE).floor() as usize)
+            .clamp(8, DENSITY_OVERVIEW_MAX_CELLS_X);
+        let bins_h = ((ph / DENSITY_OVERVIEW_CELL_SIZE).floor() as usize)
+            .clamp(8, DENSITY_OVERVIEW_MAX_CELLS_Y);
         self.density_bins.clear();
         self.density_bins.resize(bins_w * bins_h, 0);
 
