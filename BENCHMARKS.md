@@ -241,6 +241,6 @@ CI uses the five benchmarks above as the initial hard gate.
 
 The CI gate configuration lives in:
 
-- [benchmarks/ci_benchmarks.json](/Users/cypark/.codex/worktrees/9cb1/blinc_charts/benchmarks/ci_benchmarks.json)
-- [scripts/bench_ci.py](/Users/cypark/.codex/worktrees/9cb1/blinc_charts/scripts/bench_ci.py)
-- [.github/workflows/ci.yml](/Users/cypark/.codex/worktrees/9cb1/blinc_charts/.github/workflows/ci.yml)
+- [benchmarks/ci_benchmarks.json](benchmarks/ci_benchmarks.json)
+- [scripts/bench_ci.py](scripts/bench_ci.py)
+- [.github/workflows/ci.yml](.github/workflows/ci.yml)

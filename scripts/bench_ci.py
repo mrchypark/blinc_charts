@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -24,8 +25,20 @@ def parse_args():
     return parser.parse_args()
 
 
+VALID_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def sanitize_name(raw: str, field: str) -> str:
+    if not VALID_NAME.fullmatch(raw):
+        raise ValueError(f"invalid {field}: {raw!r}")
+    return raw
+
+
 def run_benchmark(item, sample_size: int, warm_up_time: int, measurement_time: int):
-    target_dir = Path("target/criterion") / item["id"]
+    bench_name = sanitize_name(item["bench"], "bench")
+    bench_id = sanitize_name(item["id"], "benchmark id")
+
+    target_dir = Path("target/criterion") / bench_id
     if target_dir.exists():
         shutil.rmtree(target_dir)
 
@@ -33,8 +46,8 @@ def run_benchmark(item, sample_size: int, warm_up_time: int, measurement_time: i
         "cargo",
         "bench",
         "--bench",
-        item["bench"],
-        item["id"],
+        bench_name,
+        bench_id,
         "--",
         "--noplot",
         "--sample-size",
@@ -46,9 +59,9 @@ def run_benchmark(item, sample_size: int, warm_up_time: int, measurement_time: i
     ]
     subprocess.run(cmd, check=True)
 
-    estimates_path = Path("target/criterion") / item["id"] / "new" / "estimates.json"
+    estimates_path = Path("target/criterion") / bench_id / "new" / "estimates.json"
     if not estimates_path.exists():
-        raise FileNotFoundError(f"missing Criterion estimates for {item['id']}: {estimates_path}")
+        raise FileNotFoundError(f"missing Criterion estimates for {bench_id}: {estimates_path}")
     estimates = load_json(estimates_path)
     return float(estimates["median"]["point_estimate"])
 

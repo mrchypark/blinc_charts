@@ -56,7 +56,7 @@ cargo bench --bench plot_compile -- --noplot --baseline main
 cargo bench --bench micro_hotpaths -- --noplot --baseline main
 ```
 
-Absolute timing budgets and benchmark interpretation live in [BENCHMARKS.md](/Users/cypark/.codex/worktrees/9cb1/blinc_charts/BENCHMARKS.md).
+Absolute timing budgets and benchmark interpretation live in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## License
 
