@@ -28,5 +28,21 @@ tracing = "0.1"
 criterion = "0.5"
 
 [[bench]]
-name = "line_render"
+name = "cartesian_render"
+harness = false
+
+[[bench]]
+name = "cartesian_interaction"
+harness = false
+
+[[bench]]
+name = "family_render"
+harness = false
+
+[[bench]]
+name = "plot_compile"
+harness = false
+
+[[bench]]
+name = "micro_hotpaths"
 harness = false
