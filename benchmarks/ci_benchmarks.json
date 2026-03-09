@@ -1,0 +1,34 @@
+{
+  "benchmarks": [
+    {
+      "bench": "plot_compile",
+      "id": "model_build_line_64k",
+      "absolute_fail_ns": 60000000,
+      "regression_fail_pct": 25.0
+    },
+    {
+      "bench": "cartesian_render",
+      "id": "line_render_warm_64k",
+      "absolute_fail_ns": 8000000,
+      "regression_fail_pct": 25.0
+    },
+    {
+      "bench": "cartesian_interaction",
+      "id": "line_hover_overlay_1k_moves_64k",
+      "absolute_fail_ns": 500000000,
+      "regression_fail_pct": 25.0
+    },
+    {
+      "bench": "cartesian_interaction",
+      "id": "multi_line_pan_plot_10_frames_1k_series_8k",
+      "absolute_fail_ns": 220000000,
+      "regression_fail_pct": 25.0
+    },
+    {
+      "bench": "micro_hotpaths",
+      "id": "lod_query_512_visible_from_64k",
+      "absolute_fail_ns": 350000,
+      "regression_fail_pct": 25.0
+    }
+  ]
+}
