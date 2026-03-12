@@ -39,6 +39,25 @@ class CompareToBaselineTests(unittest.TestCase):
         self.assertIsNotNone(comparison)
         self.assertTrue(comparison["regression_failed"])
 
+    def test_handles_zero_baseline(self):
+        item = {
+            "id": "some_id",
+            "absolute_fail_ns": 8_000_000,
+            "regression_fail_pct": 25.0,
+        }
+
+        comparison = bench_ci.compare_to_baseline(item, 100.0, {"some_id": 0.0})
+
+        self.assertIsNotNone(comparison)
+        self.assertEqual(comparison["delta_pct"], float("inf"))
+        self.assertTrue(comparison["regression_failed"])
+
+        comparison = bench_ci.compare_to_baseline(item, 0.0, {"some_id": 0.0})
+
+        self.assertIsNotNone(comparison)
+        self.assertEqual(comparison["delta_pct"], 0.0)
+        self.assertFalse(comparison["regression_failed"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,8 @@ def parse_args():
 
 
 VALID_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
+REGRESSION_FLOOR_BASELINE_RATIO = 0.75
+ONE_MILLISECOND_NS = 1_000_000.0
 
 
 def sanitize_name(raw: str, field: str) -> str:
@@ -68,14 +70,17 @@ def run_benchmark(item, sample_size: int, warm_up_time: int, measurement_time: i
 
 def regression_min_delta_ns(baseline_ns: float) -> float:
     # Ignore sub-baseline jitter, but still fail millisecond-scale regressions.
-    return min(baseline_ns * 0.75, 1_000_000.0)
+    return min(baseline_ns * REGRESSION_FLOOR_BASELINE_RATIO, ONE_MILLISECOND_NS)
 
 
 def compare_to_baseline(item, current_ns: float, baseline_lookup):
     baseline = baseline_lookup.get(item["id"])
     if baseline is None:
         return None
-    delta_pct = ((current_ns - baseline) / baseline) * 100.0
+    if baseline == 0.0:
+        delta_pct = float("inf") if current_ns > 0.0 else 0.0
+    else:
+        delta_pct = ((current_ns - baseline) / baseline) * 100.0
     delta_ns = current_ns - baseline
     min_delta_ns = regression_min_delta_ns(baseline)
     return {
