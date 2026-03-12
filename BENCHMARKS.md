@@ -67,6 +67,9 @@ That also removes named baselines, so recapture them before using `--baseline`.
 
 Use absolute budgets as the primary gate.
 Use `% change` from a named baseline as secondary context.
+In CI, the `% change` gate only fails when the slowdown also exceeds a small absolute floor:
+`min(75% of baseline median, 1 ms)`. This keeps nanosecond and microsecond jitter from flaking
+the workflow without suppressing millisecond-scale regressions.
 
 For interaction benchmarks:
 
