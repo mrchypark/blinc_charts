@@ -25,7 +25,7 @@ rustc-hash = "2.0"
 tracing = "0.1"
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.8"
 
 [[bench]]
 name = "cartesian_render"

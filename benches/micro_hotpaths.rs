@@ -1,6 +1,7 @@
 mod support;
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize};
+use criterion::{criterion_group, criterion_main, BatchSize};
+use std::hint::black_box;
 
 use support::{
     build_lod_cache, build_stitch_seed, build_dense_multi_line_model, criterion_config,
