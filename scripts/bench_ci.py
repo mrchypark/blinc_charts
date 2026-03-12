@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def load_json(path: Path):
@@ -36,7 +37,7 @@ def sanitize_name(raw: str, field: str) -> str:
     return raw
 
 
-def run_benchmark(item, sample_size: int, warm_up_time: int, measurement_time: int):
+def run_benchmark(item: dict[str, Any], sample_size: int, warm_up_time: int, measurement_time: int):
     bench_name = sanitize_name(item["bench"], "bench")
     bench_id = sanitize_name(item["id"], "benchmark id")
 
@@ -73,7 +74,9 @@ def regression_min_delta_ns(baseline_ns: float) -> float:
     return min(baseline_ns * REGRESSION_FLOOR_BASELINE_RATIO, ONE_MILLISECOND_NS)
 
 
-def compare_to_baseline(item, current_ns: float, baseline_lookup):
+def compare_to_baseline(
+    item: dict[str, Any], current_ns: float, baseline_lookup: dict[str, float]
+):
     baseline = baseline_lookup.get(item["id"])
     if baseline is None:
         return None
