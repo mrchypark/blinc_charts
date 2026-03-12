@@ -17,8 +17,8 @@ crate-type = ["lib"]
 default = []
 
 [dependencies]
-blinc_core = { git = "https://github.com/mrchypark/Blinc.git", branch = "main", package = "blinc_core" }
-blinc_layout = { git = "https://github.com/mrchypark/Blinc.git", branch = "main", package = "blinc_layout" }
+blinc_core = { git = "https://github.com/mrchypark/Blinc.git", rev = "7ddb37b68ae773466463f9a6217e404e85562744", package = "blinc_core" }
+blinc_layout = { git = "https://github.com/mrchypark/Blinc.git", rev = "7ddb37b68ae773466463f9a6217e404e85562744", package = "blinc_layout" }
 
 anyhow = "1.0"
 rustc-hash = "2.0"
