@@ -1,6 +1,7 @@
 mod support;
 
-use criterion::{black_box, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main};
+use std::hint::black_box;
 
 use support::{
     build_funnel_model, build_gauge_model, build_geo_model, build_heatmap_model,

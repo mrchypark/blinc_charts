@@ -1,6 +1,7 @@
 mod support;
 
-use criterion::{black_box, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main};
+use std::hint::black_box;
 
 use support::{
     build_bar_model_setup, build_line_model_setup, build_multi_line_model_setup,
