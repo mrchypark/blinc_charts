@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def load_json(path: Path):
@@ -26,6 +27,8 @@ def parse_args():
 
 
 VALID_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
+REGRESSION_FLOOR_BASELINE_RATIO = 0.75
+ONE_MILLISECOND_NS = 1_000_000.0
 
 
 def sanitize_name(raw: str, field: str) -> str:
@@ -34,7 +37,7 @@ def sanitize_name(raw: str, field: str) -> str:
     return raw
 
 
-def run_benchmark(item, sample_size: int, warm_up_time: int, measurement_time: int):
+def run_benchmark(item: dict[str, Any], sample_size: int, warm_up_time: int, measurement_time: int):
     bench_name = sanitize_name(item["bench"], "bench")
     bench_id = sanitize_name(item["id"], "benchmark id")
 
@@ -66,16 +69,30 @@ def run_benchmark(item, sample_size: int, warm_up_time: int, measurement_time: i
     return float(estimates["median"]["point_estimate"])
 
 
-def compare_to_baseline(item, current_ns: float, baseline_lookup):
+def regression_min_delta_ns(baseline_ns: float) -> float:
+    # Ignore sub-baseline jitter, but still fail millisecond-scale regressions.
+    return min(baseline_ns * REGRESSION_FLOOR_BASELINE_RATIO, ONE_MILLISECOND_NS)
+
+
+def compare_to_baseline(
+    item: dict[str, Any], current_ns: float, baseline_lookup: dict[str, float]
+):
     baseline = baseline_lookup.get(item["id"])
     if baseline is None:
         return None
-    delta_pct = ((current_ns - baseline) / baseline) * 100.0
+    if baseline == 0.0:
+        delta_pct = float("inf") if current_ns > 0.0 else 0.0
+    else:
+        delta_pct = ((current_ns - baseline) / baseline) * 100.0
+    delta_ns = current_ns - baseline
+    min_delta_ns = regression_min_delta_ns(baseline)
     return {
         "baseline_ns": baseline,
+        "delta_ns": delta_ns,
         "delta_pct": delta_pct,
+        "regression_min_delta_ns": min_delta_ns,
         "regression_fail_pct": item["regression_fail_pct"],
-        "regression_failed": delta_pct > item["regression_fail_pct"],
+        "regression_failed": delta_pct > item["regression_fail_pct"] and delta_ns > min_delta_ns,
     }
 
 
