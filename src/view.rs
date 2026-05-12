@@ -1,5 +1,5 @@
 use crate::scale::LinearScale;
-use blinc_core::Point;
+use blinc_paint::Point;
 
 /// 1D numeric domain (min..max).
 #[derive(Clone, Copy, Debug, PartialEq)]

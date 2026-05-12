@@ -79,7 +79,7 @@ pub fn draw_annotations<F>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blinc_core::{RecordingContext, Size};
+    use blinc_paint::PaintContext;
 
     #[test]
     fn draw_annotations_smoke() {
@@ -101,7 +101,7 @@ mod tests {
                 color: Color::rgba(1.0, 1.0, 1.0, 1.0),
             },
         ];
-        let mut ctx = RecordingContext::new(Size::new(100.0, 80.0));
+        let mut ctx = PaintContext::new(100.0, 80.0);
         draw_annotations(
             &mut ctx,
             &anns,

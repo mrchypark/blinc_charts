@@ -4,7 +4,7 @@ use criterion::{criterion_group, criterion_main, BatchSize};
 use std::hint::black_box;
 
 use support::{
-    build_lod_cache, build_stitch_seed, build_dense_multi_line_model, criterion_config,
+    build_dense_multi_line_model, build_lod_cache, build_stitch_seed, criterion_config,
     stitch_visible_edges_like_production, HEIGHT, WIDTH,
 };
 
@@ -47,7 +47,7 @@ fn bench_multi_line_density_hotpath(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }

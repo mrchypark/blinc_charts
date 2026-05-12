@@ -1,4 +1,4 @@
-use blinc_core::Color;
+use blinc_paint::Color;
 
 pub fn qualitative(index: usize, alpha: f32) -> Color {
     const HUES: &[(f32, f32, f32)] = &[

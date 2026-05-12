@@ -40,10 +40,19 @@ pub fn draw_grid(
 }
 
 pub(crate) fn closed_path_from_points(points: &[Point]) -> Option<Path> {
-    let first = points.first()?;
-    let mut commands = Vec::with_capacity(points.len() + 1);
-    commands.push(PathCommand::MoveTo(*first));
-    commands.extend(points[1..].iter().copied().map(PathCommand::LineTo));
+    closed_path_from_iter(points.iter().copied())
+}
+
+pub(crate) fn closed_path_from_iter<I>(points: I) -> Option<Path>
+where
+    I: IntoIterator<Item = Point>,
+{
+    let mut points = points.into_iter();
+    let first = points.next()?;
+    let (remaining, _) = points.size_hint();
+    let mut commands = Vec::with_capacity(remaining.saturating_add(2));
+    commands.push(PathCommand::MoveTo(first));
+    commands.extend(points.map(PathCommand::LineTo));
     commands.push(PathCommand::Close);
     Some(Path::from_commands(commands))
 }
@@ -52,7 +61,7 @@ pub(crate) fn closed_path_from_points(points: &[Point]) -> Option<Path> {
 mod tests {
     use blinc_paint::{PathCommand, Point};
 
-    use super::closed_path_from_points;
+    use super::{closed_path_from_iter, closed_path_from_points};
 
     #[test]
     fn closed_path_from_points_builds_reserved_move_lines_and_close() {
@@ -69,6 +78,19 @@ mod tests {
         assert!(matches!(path.commands()[1], PathCommand::LineTo(_)));
         assert!(matches!(path.commands()[2], PathCommand::LineTo(_)));
         assert!(matches!(path.commands()[3], PathCommand::Close));
+    }
+
+    #[test]
+    fn closed_path_from_iter_streams_points_without_a_slice() {
+        let left = [Point::new(1.0, 1.0), Point::new(2.0, 1.0)];
+        let right = [Point::new(2.0, 0.0), Point::new(1.0, 0.0)];
+
+        let path = closed_path_from_iter(left.iter().copied().chain(right.iter().rev().copied()))
+            .expect("path");
+
+        assert_eq!(path.commands().len(), 5);
+        assert!(matches!(path.commands()[0], PathCommand::MoveTo(_)));
+        assert!(matches!(path.commands()[4], PathCommand::Close));
     }
 
     #[test]

@@ -542,7 +542,7 @@ fn overlay_range_damage(
 mod tests {
     use super::*;
     use crate::xy_stack::ChartDamage;
-    use blinc_core::{RecordingContext, Size};
+    use blinc_paint::PaintContext;
 
     #[test]
     fn render_plot_does_not_panic_when_style_max_points_is_below_internal_minimum() {
@@ -550,7 +550,7 @@ mod tests {
         let mut model = ScatterChartModel::new(series);
         model.style.max_points = 64;
 
-        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let mut ctx = PaintContext::new(320.0, 200.0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             model.render_plot(&mut ctx, 320.0, 200.0);
         }));

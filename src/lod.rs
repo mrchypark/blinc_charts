@@ -1,4 +1,4 @@
-use blinc_core::Point;
+use blinc_paint::Point;
 
 use crate::time_series::TimeSeriesF32;
 

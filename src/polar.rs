@@ -213,7 +213,10 @@ impl PolarChartModel {
     }
 
     fn render_radar(&self, ctx: &mut dyn DrawContext, px: f32, py: f32, pw: f32, ph: f32) {
-        let dims_n = self.dimensions.len().max(3);
+        let dims_n = self.dimensions.len();
+        if dims_n == 0 {
+            return;
+        }
         let cx = px + pw * 0.5;
         let cy = py + ph * 0.5;
         let r = (pw.min(ph) * 0.42).max(10.0);
@@ -348,7 +351,7 @@ pub fn polar_chart(handle: PolarChartHandle) -> impl ElementBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blinc_core::{DrawCommand, RecordingContext, Size};
+    use blinc_paint::{DrawCommand, PaintContext};
 
     #[test]
     fn parallel_mode_does_not_render_stub_label() {
@@ -359,7 +362,7 @@ mod tests {
         .unwrap();
         model.mode = PolarChartMode::Parallel;
 
-        let mut ctx = RecordingContext::new(Size::new(320.0, 220.0));
+        let mut ctx = PaintContext::new(320.0, 220.0);
         model.render_plot(&mut ctx, 320.0, 220.0);
 
         let labels: Vec<&str> = ctx
@@ -375,5 +378,24 @@ mod tests {
             !labels.contains(&"parallel (uses radar v1)"),
             "parallel mode must not render the old stub label"
         );
+    }
+
+    #[test]
+    fn radar_mode_does_not_inject_synthetic_dimension_for_two_dimensions() {
+        let model =
+            PolarChartModel::new_radar(vec!["A".into(), "B".into()], vec![vec![1.0, 1.0]]).unwrap();
+        let mut ctx = PaintContext::new(320.0, 220.0);
+
+        model.render_plot(&mut ctx, 320.0, 220.0);
+
+        let fill_path = ctx
+            .commands()
+            .iter()
+            .find_map(|cmd| match cmd {
+                DrawCommand::FillPath { path, .. } => Some(path),
+                _ => None,
+            })
+            .expect("radar fill path");
+        assert_eq!(fill_path.commands().len(), 4);
     }
 }

@@ -743,7 +743,7 @@ pub fn hierarchy_chart(handle: HierarchyChartHandle) -> impl ElementBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blinc_core::{RecordingContext, Size};
+    use blinc_paint::PaintContext;
 
     #[test]
     fn packing_render_does_not_panic_on_small_viewport() {
@@ -751,7 +751,7 @@ mod tests {
         let mut model = HierarchyChartModel::new(root).unwrap();
         model.style.mode = HierarchyMode::Packing;
 
-        let mut ctx = RecordingContext::new(Size::new(50.0, 50.0));
+        let mut ctx = PaintContext::new(50.0, 50.0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             model.render_plot(&mut ctx, 50.0, 50.0);
         }));

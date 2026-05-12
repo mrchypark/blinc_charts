@@ -1,4 +1,4 @@
-use blinc_core::Point;
+use blinc_paint::Point;
 
 pub fn rect_polygon(x0: f32, y0: f32, x1: f32, y1: f32) -> [Point; 4] {
     let left = x0.min(x1);

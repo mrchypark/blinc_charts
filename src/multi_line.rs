@@ -816,7 +816,7 @@ fn series_set_fingerprint(series: &[TimeSeriesF32]) -> u64 {
 mod tests {
     use super::*;
     use crate::xy_stack::ChartDamage;
-    use blinc_core::{RecordingContext, Size};
+    use blinc_paint::PaintContext;
 
     #[test]
     fn new_rejects_empty_series() {
@@ -829,7 +829,7 @@ mod tests {
         let mut model = MultiLineChartModel::new(vec![s]).unwrap();
         model.style.max_points_per_series = 1;
 
-        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let mut ctx = PaintContext::new(320.0, 200.0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             model.render_plot(&mut ctx, 320.0, 200.0);
         }));
@@ -875,7 +875,7 @@ mod tests {
         let mut model = MultiLineChartModel::new(vec![series]).unwrap();
         model.view.domain = Domain2D::new(Domain1D::new(0.0, 1.0), Domain1D::new(0.0, 10.0));
 
-        let mut ctx = RecordingContext::new(Size::new(64.0, 64.0));
+        let mut ctx = PaintContext::new(64.0, 64.0);
         model.render_density_overview(&mut ctx, 0.0, 0.0, 48.0, 48.0);
 
         assert_eq!(model.density_bins.len(), 64);
@@ -889,7 +889,7 @@ mod tests {
         let mut model = MultiLineChartModel::new(vec![series.clone()]).unwrap();
         model.series.push(series);
 
-        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let mut ctx = PaintContext::new(320.0, 200.0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             model.render_plot(&mut ctx, 320.0, 200.0);
         }));
@@ -901,7 +901,7 @@ mod tests {
     fn render_plot_invalidates_cached_geometry_after_series_append() {
         let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
         let mut model = MultiLineChartModel::new(vec![series.clone()]).unwrap();
-        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let mut ctx = PaintContext::new(320.0, 200.0);
 
         model.render_plot(&mut ctx, 320.0, 200.0);
         model.series.push(series);
@@ -914,7 +914,7 @@ mod tests {
     fn render_plot_truncates_lod_state_when_series_shrinks() {
         let series = TimeSeriesF32::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]).unwrap();
         let mut model = MultiLineChartModel::new(vec![series.clone(), series]).unwrap();
-        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let mut ctx = PaintContext::new(320.0, 200.0);
 
         model.render_plot(&mut ctx, 320.0, 200.0);
         model.series.pop();

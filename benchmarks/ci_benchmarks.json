@@ -13,6 +13,42 @@
       "regression_fail_pct": 25.0
     },
     {
+      "bench": "cartesian_render",
+      "id": "area_render_warm_64k",
+      "absolute_fail_ns": 8000000,
+      "regression_fail_pct": 25.0
+    },
+    {
+      "bench": "cartesian_render",
+      "id": "stacked_area_render_32x4k",
+      "absolute_fail_ns": 35000000,
+      "regression_fail_pct": 25.0
+    },
+    {
+      "bench": "cartesian_render",
+      "id": "statistics_violin_render_64x128",
+      "absolute_fail_ns": 35000000,
+      "regression_fail_pct": 25.0
+    },
+    {
+      "bench": "cartesian_render",
+      "id": "statistics_error_band_render_64x128",
+      "absolute_fail_ns": 35000000,
+      "regression_fail_pct": 25.0
+    },
+    {
+      "bench": "family_render",
+      "id": "hierarchy_render_branch4_depth6",
+      "absolute_fail_ns": 25000000,
+      "regression_fail_pct": 25.0
+    },
+    {
+      "bench": "family_render",
+      "id": "polar_render_32_dims_16_series",
+      "absolute_fail_ns": 25000000,
+      "regression_fail_pct": 25.0
+    },
+    {
       "bench": "cartesian_interaction",
       "id": "line_hover_overlay_1k_moves_64k",
       "absolute_fail_ns": 500000000,
@@ -25,9 +61,21 @@
       "regression_fail_pct": 25.0
     },
     {
+      "bench": "cartesian_render",
+      "id": "multi_line_render_density_overview_10k_series",
+      "absolute_fail_ns": 35000000,
+      "regression_fail_pct": 25.0
+    },
+    {
       "bench": "micro_hotpaths",
       "id": "lod_query_512_visible_from_64k",
       "absolute_fail_ns": 350000,
+      "regression_fail_pct": 25.0
+    },
+    {
+      "bench": "micro_hotpaths",
+      "id": "multi_line_density_hotpath_10k_series",
+      "absolute_fail_ns": 35000000,
       "regression_fail_pct": 25.0
     }
   ]

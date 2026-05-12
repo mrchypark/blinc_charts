@@ -1,5 +1,5 @@
 use blinc_charts::prelude::*;
-use blinc_core::Point;
+use blinc_paint::Point;
 
 #[test]
 fn stacked_area_rejects_empty() {

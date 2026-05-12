@@ -1,4 +1,4 @@
-use blinc_core::Point;
+use blinc_paint::Point;
 
 /// Return contiguous runs of points where adjacent `x` deltas do not exceed `gap_dx`.
 ///

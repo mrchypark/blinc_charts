@@ -8,7 +8,10 @@ This repository was split from `mrchypark/Blinc` (`crates/blinc_charts`) with hi
 
 ## Dependencies
 
-`blinc_charts` depends on `blinc_core` and `blinc_layout` from `mrchypark/Blinc`.
+`blinc_charts` depends on `blinc_core`, `blinc_layout`, and `blinc_paint` from
+`mrchypark/Blinc`. Chart rendering code uses `blinc_paint` for the paint-facing
+primitive surface while keeping direct `blinc_core` usage for APIs that are not
+currently re-exported by `blinc_paint`.
 
 ## Usage
 
