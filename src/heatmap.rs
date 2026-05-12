@@ -1,9 +1,9 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 use blinc_layout::canvas::canvas;
 use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 
 use crate::common::{draw_grid, fill_bg};
 use crate::view::{ChartView, Domain1D, Domain2D};

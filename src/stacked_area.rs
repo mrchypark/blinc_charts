@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Path, PathCommand, Point, Rect, Stroke, TextStyle};
 
 use crate::brush::BrushX;
 use crate::common::{draw_grid, fill_bg};
@@ -31,6 +31,8 @@ pub struct StackedAreaChartStyle {
 
     pub mode: StackedAreaMode,
     pub stroke_width: f32,
+    /// Maximum number of stacked bands rendered and included in Y-domain bounds.
+    pub max_series: usize,
     pub scroll_zoom_factor: f32,
     pub pinch_zoom_min: f32,
 }
@@ -44,6 +46,7 @@ impl Default for StackedAreaChartStyle {
             crosshair: Color::rgba(1.0, 1.0, 1.0, 0.35),
             mode: StackedAreaMode::Stacked,
             stroke_width: 1.0,
+            max_series: 16,
             scroll_zoom_factor: 0.02,
             pinch_zoom_min: 0.01,
         }
@@ -102,7 +105,7 @@ pub struct StackedAreaChartModel {
     cached_sample_xs: Vec<f32>,
     cached_bottoms: Vec<f32>, // [s*sample_n + k]
     cached_tops: Vec<f32>,    // [s*sample_n + k]
-    cached_band_paths: Vec<blinc_core::Path>,
+    cached_band_paths: Vec<Path>,
     cached_top_pts: Vec<Vec<Point>>, // per-band polyline (px)
     scratch_vals: Vec<f32>,
 }
@@ -301,6 +304,16 @@ impl StackedAreaChartModel {
         self.view.plot_rect(w, h)
     }
 
+    pub fn visible_series_count(&self) -> usize {
+        self.series.len().min(self.style.max_series)
+    }
+
+    pub fn truncated_series_count(&self) -> usize {
+        self.series
+            .len()
+            .saturating_sub(self.visible_series_count())
+    }
+
     pub fn on_mouse_move(&mut self, local_x: f32, local_y: f32, w: f32, h: f32) {
         let (px, py, pw, ph) = self.plot_rect(w, h);
         if pw <= 0.0 || ph <= 0.0 {
@@ -408,8 +421,9 @@ impl StackedAreaChartModel {
         }
         draw_grid(ctx, px, py, pw, ph, self.style.grid, 4);
 
+        let series_n = self.visible_series_count();
         let (y_min, y_max) = Self::compute_mode_bounds(
-            &self.series,
+            &self.series[..series_n],
             self.style.mode,
             self.view.domain.x.min,
             self.view.domain.x.max,
@@ -450,7 +464,7 @@ impl StackedAreaChartModel {
             return;
         }
 
-        let series_n = self.series.len().min(16);
+        let series_n = self.visible_series_count();
         let key = CacheKey::new(self, plot, series_n);
         if self.cached_key == Some(key) {
             return;
@@ -468,10 +482,10 @@ impl StackedAreaChartModel {
             top.clear();
         }
 
-        let Some(_first) = self.series.first() else {
+        if series_n == 0 {
             self.cached_key = Some(key);
             return;
-        };
+        }
 
         // Sample at ~1-2 points per pixel for smooth fills.
         let max_samples = (pw.ceil() as usize).clamp(64, 2_000);
@@ -541,26 +555,28 @@ impl StackedAreaChartModel {
             let top_pts = &mut self.cached_top_pts[s];
             top_pts.reserve(sample_n);
 
-            let mut path: Option<blinc_core::Path> = None;
+            let mut commands = Vec::with_capacity(sample_n.saturating_mul(2).saturating_add(1));
             for (k, &x) in self.cached_sample_xs.iter().enumerate() {
                 let y = self.cached_tops[s * sample_n + k];
                 let p = self.view.data_to_px(Point::new(x, y), px, py, pw, ph);
                 top_pts.push(p);
-                path = Some(match path {
-                    None => blinc_core::Path::new().move_to(p.x, p.y),
-                    Some(prev) => prev.line_to(p.x, p.y),
-                });
+                if commands.is_empty() {
+                    commands.push(PathCommand::MoveTo(p));
+                } else {
+                    commands.push(PathCommand::LineTo(p));
+                }
             }
 
-            let Some(mut path) = path else {
+            if commands.is_empty() {
                 continue;
-            };
+            }
             for (k, &x) in self.cached_sample_xs.iter().enumerate().rev() {
                 let y = self.cached_bottoms[s * sample_n + k];
                 let p = self.view.data_to_px(Point::new(x, y), px, py, pw, ph);
-                path = path.line_to(p.x, p.y);
+                commands.push(PathCommand::LineTo(p));
             }
-            path = path.close();
+            commands.push(PathCommand::Close);
+            let path = Path::from_commands(commands);
             self.cached_band_paths.push(path);
         }
 
@@ -700,7 +716,7 @@ pub fn linked_stacked_area_chart_with_bindings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blinc_core::{RecordingContext, Size};
+    use blinc_paint::PaintContext;
 
     #[test]
     fn new_accepts_misaligned_x_samples() {
@@ -718,7 +734,7 @@ mod tests {
         let b = TimeSeriesF32::new(vec![0.5, 1.5, 2.5], vec![0.8, 1.4, 0.7]).unwrap();
         let c = TimeSeriesF32::new(vec![0.25, 2.25, 3.25], vec![0.4, 0.9, 0.6]).unwrap();
         let mut model = StackedAreaChartModel::new(vec![a, b, c]).unwrap();
-        let mut ctx = RecordingContext::new(Size::new(360.0, 220.0));
+        let mut ctx = PaintContext::new(360.0, 220.0);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             model.render_plot(&mut ctx, 360.0, 220.0);
@@ -735,7 +751,7 @@ mod tests {
         let mut model = StackedAreaChartModel::new(vec![a, b]).unwrap();
         model.style.mode = StackedAreaMode::Stacked;
 
-        let mut ctx = RecordingContext::new(Size::new(360.0, 220.0));
+        let mut ctx = PaintContext::new(360.0, 220.0);
         model.render_plot(&mut ctx, 360.0, 220.0);
         assert!(model.view.domain.y.min < 0.0);
         assert!(model.view.domain.y.max > 0.0);
@@ -748,9 +764,26 @@ mod tests {
         let mut model = StackedAreaChartModel::new(vec![a, b]).unwrap();
         model.style.mode = StackedAreaMode::Streamgraph;
 
-        let mut ctx = RecordingContext::new(Size::new(360.0, 220.0));
+        let mut ctx = PaintContext::new(360.0, 220.0);
         model.render_plot(&mut ctx, 360.0, 220.0);
         assert!(model.view.domain.y.min < 0.0);
         assert!(model.view.domain.y.max > 0.0);
+    }
+
+    #[test]
+    fn default_series_cap_is_visible_and_bounds_match_rendered_series() {
+        let mut series = (0..16)
+            .map(|_| TimeSeriesF32::new(vec![0.0, 1.0], vec![1.0, 1.0]).unwrap())
+            .collect::<Vec<_>>();
+        series.push(TimeSeriesF32::new(vec![0.0, 1.0], vec![1000.0, 1000.0]).unwrap());
+        let mut model = StackedAreaChartModel::new(series).unwrap();
+        let mut ctx = PaintContext::new(360.0, 220.0);
+
+        model.render_plot(&mut ctx, 360.0, 220.0);
+
+        assert_eq!(model.visible_series_count(), 16);
+        assert_eq!(model.truncated_series_count(), 1);
+        assert_eq!(model.cached_band_paths.len(), 16);
+        assert!(model.view.domain.y.max < 1000.0);
     }
 }

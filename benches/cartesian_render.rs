@@ -6,20 +6,23 @@ use std::hint::black_box;
 use support::{
     build_dense_area_model, build_dense_bar_model, build_dense_line_model,
     build_dense_multi_line_model, build_dense_scatter_model, build_histogram_model,
-    build_small_windows, criterion_config, recording_context, HEIGHT, WIDTH,
+    build_small_windows, build_stacked_area_model, build_statistics_model, criterion_config,
+    recording_context, HEIGHT, WIDTH,
 };
+
+use blinc_charts::statistics::StatisticsMode;
 
 fn bench_line_render_warm(c: &mut criterion::Criterion) {
     c.bench_function("line_render_warm_64k", |b| {
         let mut model = build_dense_line_model(65_536);
         let mut ctx = recording_context();
         model.render_plot(&mut ctx, WIDTH, HEIGHT);
-        ctx.clear();
+        let _ = ctx.take_commands();
 
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -37,7 +40,7 @@ fn bench_line_small_window_render(c: &mut criterion::Criterion) {
             model.view.domain.x = windows[index];
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -50,7 +53,7 @@ fn bench_scatter_render_warm(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -63,7 +66,7 @@ fn bench_bar_render_grouped(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -76,7 +79,22 @@ fn bench_area_render_warm(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
+        });
+    });
+}
+
+fn bench_stacked_area_render(c: &mut criterion::Criterion) {
+    c.bench_function("stacked_area_render_32x4k", |b| {
+        let mut model = build_stacked_area_model(32, 4_096);
+        let mut ctx = recording_context();
+        model.render_plot(&mut ctx, WIDTH, HEIGHT);
+        let _ = ctx.take_commands();
+
+        b.iter(|| {
+            model.render_plot(&mut ctx, WIDTH, HEIGHT);
+            black_box(ctx.commands().len());
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -89,7 +107,33 @@ fn bench_histogram_render_warm(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
+        });
+    });
+}
+
+fn bench_statistics_violin_render(c: &mut criterion::Criterion) {
+    c.bench_function("statistics_violin_render_64x128", |b| {
+        let model = build_statistics_model(64, 128, StatisticsMode::Violin);
+        let mut ctx = recording_context();
+
+        b.iter(|| {
+            model.render_plot(&mut ctx, WIDTH, HEIGHT);
+            black_box(ctx.commands().len());
+            let _ = ctx.take_commands();
+        });
+    });
+}
+
+fn bench_statistics_error_band_render(c: &mut criterion::Criterion) {
+    c.bench_function("statistics_error_band_render_64x128", |b| {
+        let model = build_statistics_model(64, 128, StatisticsMode::ErrorBand);
+        let mut ctx = recording_context();
+
+        b.iter(|| {
+            model.render_plot(&mut ctx, WIDTH, HEIGHT);
+            black_box(ctx.commands().len());
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -99,12 +143,12 @@ fn bench_multi_line_render(c: &mut criterion::Criterion) {
         let mut model = build_dense_multi_line_model(1_000, 8_192);
         let mut ctx = recording_context();
         model.render_plot(&mut ctx, WIDTH, HEIGHT);
-        ctx.clear();
+        let _ = ctx.take_commands();
 
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -118,7 +162,7 @@ fn bench_multi_line_density_overview(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -132,7 +176,10 @@ criterion_group! {
         bench_scatter_render_warm,
         bench_bar_render_grouped,
         bench_area_render_warm,
+        bench_stacked_area_render,
         bench_histogram_render_warm,
+        bench_statistics_violin_render,
+        bench_statistics_error_band_render,
         bench_multi_line_render,
         bench_multi_line_density_overview
 }

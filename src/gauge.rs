@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use blinc_core::{Brush, Color, DrawContext, Path, Point, Stroke, TextStyle};
 use blinc_layout::canvas::canvas;
 use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Path, Point, Stroke, TextStyle};
 
 use crate::common::fill_bg;
 use crate::format::format_compact;

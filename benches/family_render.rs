@@ -16,7 +16,7 @@ fn bench_heatmap_render(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -28,7 +28,7 @@ fn bench_hierarchy_render(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -41,7 +41,7 @@ fn bench_network_hover_and_render(c: &mut criterion::Criterion) {
             model.on_mouse_move(320.0, 220.0, WIDTH, HEIGHT);
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -55,7 +55,7 @@ fn bench_geo_pan_and_render(c: &mut criterion::Criterion) {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
             model.on_drag_end();
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -67,7 +67,7 @@ fn bench_gauge_render(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -79,7 +79,7 @@ fn bench_funnel_render(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }
@@ -91,7 +91,7 @@ fn bench_polar_render(c: &mut criterion::Criterion) {
         b.iter(|| {
             model.render_plot(&mut ctx, WIDTH, HEIGHT);
             black_box(ctx.commands().len());
-            ctx.clear();
+            let _ = ctx.take_commands();
         });
     });
 }

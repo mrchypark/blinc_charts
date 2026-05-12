@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 
 use crate::annotation::{draw_annotations, ChartAnnotation};
 use crate::axis::{build_bottom_ticks, build_left_ticks, draw_bottom_axis, draw_left_axis};

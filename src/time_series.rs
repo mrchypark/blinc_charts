@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use blinc_core::Point;
+use blinc_paint::Point;
 
 /// A compact time series with `f32` x/y values.
 ///

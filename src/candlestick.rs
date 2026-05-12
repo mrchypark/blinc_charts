@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
 
 use crate::brush::BrushX;
 use crate::common::{draw_grid, fill_bg};
@@ -537,7 +537,7 @@ pub fn linked_candlestick_chart_with_bindings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blinc_core::{Brush, DrawCommand, RecordingContext, Size};
+    use blinc_paint::{Brush, DrawCommand, PaintContext};
 
     #[test]
     fn render_plot_does_not_panic_when_style_max_candles_is_too_small() {
@@ -552,7 +552,7 @@ mod tests {
         let mut model = CandlestickChartModel::new(series);
         model.style.max_candles = 8;
 
-        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let mut ctx = PaintContext::new(320.0, 200.0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             model.render_plot(&mut ctx, 320.0, 200.0);
         }));
@@ -573,7 +573,7 @@ mod tests {
         let mut model = CandlestickChartModel::new(series);
         model.style.max_candles = 16;
 
-        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let mut ctx = PaintContext::new(320.0, 200.0);
         model.render_plot(&mut ctx, 320.0, 200.0);
 
         let mut body_count = 0usize;

@@ -1,4 +1,4 @@
-use blinc_core::Point;
+use blinc_paint::Point;
 
 #[derive(Clone, Debug)]
 pub struct SpatialIndex {

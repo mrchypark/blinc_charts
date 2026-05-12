@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Path, PathCommand, Point, Rect, Stroke, TextStyle};
 
 use crate::brush::BrushX;
 use crate::common::{draw_grid, fill_bg};
@@ -272,16 +272,16 @@ impl AreaChartModel {
         if self.points_px.len() >= 2 {
             // Area fill
             let baseline_px = self.view.y_to_px(self.style.baseline_y, py, ph);
-            let mut path = Path::new();
             // Clamp baseline to plot.
             let baseline_px = baseline_px.clamp(py, py + ph);
             let first = self.points_px[0];
-            path = path.move_to(first.x, baseline_px);
-            for p in &self.points_px {
-                path = path.line_to(p.x, p.y);
-            }
             let last = self.points_px[self.points_px.len() - 1];
-            path = path.line_to(last.x, baseline_px).close();
+            let mut commands = Vec::with_capacity(self.points_px.len() + 3);
+            commands.push(PathCommand::MoveTo(Point::new(first.x, baseline_px)));
+            commands.extend(self.points_px.iter().copied().map(PathCommand::LineTo));
+            commands.push(PathCommand::LineTo(Point::new(last.x, baseline_px)));
+            commands.push(PathCommand::Close);
+            let path = Path::from_commands(commands);
             ctx.fill_path(&path, Brush::Solid(self.style.area));
 
             // Outline

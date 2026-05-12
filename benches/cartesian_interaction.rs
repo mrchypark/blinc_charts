@@ -31,7 +31,7 @@ fn bench_line_hover_overlay(c: &mut criterion::Criterion) {
         let mut model = build_dense_line_model(65_536);
         let mut ctx = recording_context();
         model.render_plot(&mut ctx, WIDTH, HEIGHT);
-        ctx.clear();
+        let _ = ctx.take_commands();
 
         b.iter(|| {
             for i in 0..HOVER_STEPS {
@@ -39,7 +39,7 @@ fn bench_line_hover_overlay(c: &mut criterion::Criterion) {
                 model.on_mouse_move(x, 120.0, WIDTH, HEIGHT);
                 model.render_overlay(&mut ctx, WIDTH, HEIGHT);
                 black_box(ctx.commands().len());
-                ctx.clear();
+                let _ = ctx.take_commands();
             }
         });
     });
@@ -50,7 +50,7 @@ fn bench_scatter_hover_overlay(c: &mut criterion::Criterion) {
         let mut model = build_dense_scatter_model(65_536);
         let mut ctx = recording_context();
         model.render_plot(&mut ctx, WIDTH, HEIGHT);
-        ctx.clear();
+        let _ = ctx.take_commands();
 
         b.iter(|| {
             for i in 0..HOVER_STEPS {
@@ -59,7 +59,7 @@ fn bench_scatter_hover_overlay(c: &mut criterion::Criterion) {
                 model.on_mouse_move(x, y, WIDTH, HEIGHT);
                 model.render_overlay(&mut ctx, WIDTH, HEIGHT);
                 black_box(ctx.commands().len());
-                ctx.clear();
+                let _ = ctx.take_commands();
             }
         });
     });
@@ -70,7 +70,7 @@ fn bench_line_pan_plot(c: &mut criterion::Criterion) {
         let mut model = build_dense_line_model(65_536);
         let mut ctx = recording_context();
         model.render_plot(&mut ctx, WIDTH, HEIGHT);
-        ctx.clear();
+        let _ = ctx.take_commands();
 
         b.iter(|| {
             for frame in 0..PAN_FRAMES {
@@ -80,7 +80,7 @@ fn bench_line_pan_plot(c: &mut criterion::Criterion) {
                 model.render_plot(&mut ctx, WIDTH, HEIGHT);
                 black_box(ctx.commands().len());
                 model.on_drag_end();
-                ctx.clear();
+                let _ = ctx.take_commands();
             }
         });
     });
@@ -97,7 +97,7 @@ fn bench_line_scroll_plot(c: &mut criterion::Criterion) {
                 model.on_scroll(-32.0, cursor, WIDTH, HEIGHT);
                 model.render_plot(&mut ctx, WIDTH, HEIGHT);
                 black_box(ctx.commands().len());
-                ctx.clear();
+                let _ = ctx.take_commands();
             }
         });
     });
@@ -114,7 +114,7 @@ fn bench_line_pinch_plot(c: &mut criterion::Criterion) {
                 model.on_pinch(1.01, cursor, WIDTH, HEIGHT);
                 model.render_plot(&mut ctx, WIDTH, HEIGHT);
                 black_box(ctx.commands().len());
-                ctx.clear();
+                let _ = ctx.take_commands();
             }
         });
     });
@@ -125,7 +125,7 @@ fn bench_multi_line_pan_plot(c: &mut criterion::Criterion) {
         let mut model = build_dense_multi_line_model(1_000, 8_192);
         let mut ctx = recording_context();
         model.render_plot(&mut ctx, WIDTH, HEIGHT);
-        ctx.clear();
+        let _ = ctx.take_commands();
 
         b.iter(|| {
             for frame in 0..PAN_FRAMES {
@@ -135,7 +135,7 @@ fn bench_multi_line_pan_plot(c: &mut criterion::Criterion) {
                 model.render_plot(&mut ctx, WIDTH, HEIGHT);
                 black_box(ctx.commands().len());
                 model.on_drag_end();
-                ctx.clear();
+                let _ = ctx.take_commands();
             }
         });
     });

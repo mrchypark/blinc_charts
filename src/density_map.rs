@@ -1,9 +1,9 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
 use blinc_layout::canvas::canvas;
 use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
 
 use crate::brush::BrushRect;
 use crate::common::{draw_grid, fill_bg};
@@ -328,6 +328,13 @@ impl DensityMapChartModel {
             if !p.x.is_finite() || !p.y.is_finite() {
                 continue;
             }
+            if p.x < self.view.domain.x.min
+                || p.x > self.view.domain.x.max
+                || p.y < self.view.domain.y.min
+                || p.y > self.view.domain.y.max
+            {
+                continue;
+            }
             let tx = ((p.x - self.view.domain.x.min) * inv_x).clamp(0.0, 0.999_999);
             let ty = ((p.y - self.view.domain.y.min) * inv_y).clamp(0.0, 0.999_999);
             let ix = (tx * bins_w as f32) as usize;
@@ -582,4 +589,29 @@ pub fn density_map_chart(handle: DensityMapChartHandle) -> impl ElementBuilder {
             .h_full()
             .foreground(),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bins_ignore_points_outside_visible_domain() {
+        let mut model = DensityMapChartModel::new(vec![
+            Point::new(-100.0, 0.5),
+            Point::new(0.5, 0.5),
+            Point::new(100.0, 0.5),
+            Point::new(0.5, -100.0),
+            Point::new(0.5, 100.0),
+        ])
+        .unwrap();
+        model.view.domain = Domain2D::new(Domain1D::new(0.0, 1.0), Domain1D::new(0.0, 1.0));
+        model.style.max_cells_x = 8;
+        model.style.max_cells_y = 8;
+
+        model.ensure_bins(320.0, 240.0);
+
+        assert_eq!(model.bins.iter().copied().sum::<u32>(), 1);
+        assert_eq!(model.bins_max, 1);
+    }
 }

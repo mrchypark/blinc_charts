@@ -8,7 +8,7 @@ use blinc_charts::time_format::format_hms;
 use blinc_charts::transition::ValueTransition;
 use blinc_charts::triangulation::triangulate_fan;
 use blinc_charts::Domain1D;
-use blinc_core::Point;
+use blinc_paint::Point;
 
 #[test]
 fn linear_scale_maps_and_inverts() {

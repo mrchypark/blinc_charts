@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
 use blinc_layout::canvas::canvas;
 use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
 
 use crate::common::{draw_grid, fill_bg};
 use crate::palette;
@@ -920,7 +920,7 @@ pub fn network_chart(handle: NetworkChartHandle) -> impl ElementBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blinc_core::{RecordingContext, Size};
+    use blinc_paint::PaintContext;
 
     #[test]
     fn sankey_hover_uses_sankey_layout_positions() {
@@ -962,7 +962,7 @@ mod tests {
         model.style.max_nodes = 600;
         model.style.max_links = 8;
 
-        let mut ctx = RecordingContext::new(Size::new(360.0, 240.0));
+        let mut ctx = PaintContext::new(360.0, 240.0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             model.render_plot(&mut ctx, 360.0, 240.0);
         }));

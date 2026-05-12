@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
 
 use crate::brush::BrushX;
-use crate::common::{draw_grid, fill_bg};
+use crate::common::{closed_path_from_iter, draw_grid, fill_bg};
 use crate::view::{ChartView, Domain1D, Domain2D};
 use crate::xy_stack::InteractiveXChartModel;
 
@@ -430,14 +430,11 @@ impl StatisticsChartModel {
                         bot_pts.push(Point::new(xc - hw, y));
                     }
                     if !top_pts.is_empty() {
-                        let mut path = Path::new().move_to(top_pts[0].x, top_pts[0].y);
-                        for p in &top_pts[1..] {
-                            path = path.line_to(p.x, p.y);
-                        }
-                        for p in bot_pts.iter().rev() {
-                            path = path.line_to(p.x, p.y);
-                        }
-                        path = path.close();
+                        let Some(path) = closed_path_from_iter(
+                            top_pts.iter().copied().chain(bot_pts.iter().rev().copied()),
+                        ) else {
+                            continue;
+                        };
                         ctx.fill_path(
                             &path,
                             Brush::Solid(Color::rgba(
@@ -494,14 +491,14 @@ impl StatisticsChartModel {
         }
 
         if self.style.mode == StatisticsMode::ErrorBand && mean_pts.len() >= 2 {
-            let mut path = Path::new().move_to(band_top[0].x, band_top[0].y);
-            for p in &band_top[1..] {
-                path = path.line_to(p.x, p.y);
-            }
-            for p in band_bot.iter().rev() {
-                path = path.line_to(p.x, p.y);
-            }
-            path = path.close();
+            let Some(path) = closed_path_from_iter(
+                band_top
+                    .iter()
+                    .copied()
+                    .chain(band_bot.iter().rev().copied()),
+            ) else {
+                return;
+            };
             ctx.fill_path(
                 &path,
                 Brush::Solid(Color::rgba(
@@ -647,14 +644,14 @@ pub fn statistics_chart_with_bindings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blinc_core::{RecordingContext, Size};
+    use blinc_paint::PaintContext;
 
     #[test]
     fn render_plot_does_not_panic_when_x_domain_is_outside_groups() {
         let mut model = StatisticsChartModel::new(vec![vec![1.0, 2.0, 3.0]]).unwrap();
         model.view.domain.x = Domain1D::new(10.0, 11.0);
 
-        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let mut ctx = PaintContext::new(320.0, 200.0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             model.render_plot(&mut ctx, 320.0, 200.0);
         }));
@@ -671,7 +668,7 @@ mod tests {
         .unwrap();
         model.style.mode = StatisticsMode::Violin;
 
-        let mut ctx = RecordingContext::new(Size::new(320.0, 200.0));
+        let mut ctx = PaintContext::new(320.0, 200.0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             model.render_plot(&mut ctx, 320.0, 200.0);
         }));
@@ -688,7 +685,7 @@ mod tests {
         .unwrap();
         model.style.mode = StatisticsMode::ErrorBand;
 
-        let mut ctx = RecordingContext::new(Size::new(360.0, 220.0));
+        let mut ctx = PaintContext::new(360.0, 220.0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             model.render_plot(&mut ctx, 360.0, 220.0);
         }));

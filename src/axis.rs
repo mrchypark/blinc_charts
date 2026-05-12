@@ -1,4 +1,5 @@
-use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextBaseline, TextStyle};
+use blinc_core::TextBaseline;
+use blinc_paint::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 
 use crate::scale::{LinearScale, LogScale};
 use crate::view::Domain1D;

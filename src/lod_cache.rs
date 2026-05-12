@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use blinc_core::Point;
+use blinc_paint::Point;
 
 use crate::time_series::TimeSeriesF32;
 
@@ -46,9 +46,7 @@ impl SeriesLodCache {
         let min_bucket = min_bucket.max(1);
 
         for level_idx in 0..max_levels {
-            let scale = 1usize
-                .checked_shl(level_idx as u32)
-                .unwrap_or(usize::MAX);
+            let scale = 1usize.checked_shl(level_idx as u32).unwrap_or(usize::MAX);
             let bucket_size = min_bucket.saturating_mul(scale).max(1);
             let level = build_level(series, bucket_size);
             if level.is_empty() {
@@ -99,8 +97,7 @@ impl SeriesLodCache {
             let score = ratio_error(count, target);
             match best {
                 Some((_, _, _, best_score, best_count))
-                    if score > best_score
-                        || (score == best_score && count <= best_count) => {}
+                    if score > best_score || (score == best_score && count <= best_count) => {}
                 _ => best = Some((level_idx, start, end, score, count)),
             }
         }
@@ -240,7 +237,7 @@ fn ratio_error(count: usize, target: usize) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use blinc_core::Point;
+    use blinc_paint::Point;
 
     use crate::TimeSeriesF32;
 

@@ -14,8 +14,10 @@ use blinc_charts::multi_line::MultiLineChartModel;
 use blinc_charts::network::NetworkChartModel;
 use blinc_charts::polar::PolarChartModel;
 use blinc_charts::scatter::ScatterChartModel;
+use blinc_charts::stacked_area::StackedAreaChartModel;
+use blinc_charts::statistics::{StatisticsChartModel, StatisticsMode};
 use blinc_charts::{Domain1D, SeriesLodCache, TimeSeriesF32};
-use blinc_core::{Point, RecordingContext, Size};
+use blinc_paint::{PaintContext, Point};
 use criterion::Criterion;
 
 pub const WIDTH: f32 = 1280.0;
@@ -28,8 +30,8 @@ pub fn criterion_config() -> Criterion {
         .noise_threshold(0.05)
 }
 
-pub fn recording_context() -> RecordingContext {
-    RecordingContext::new(Size::new(WIDTH, HEIGHT))
+pub fn recording_context() -> PaintContext {
+    PaintContext::new(WIDTH, HEIGHT)
 }
 
 pub fn shared_x(points: usize) -> Arc<[f32]> {
@@ -69,6 +71,17 @@ pub fn build_dense_area_model(points: usize) -> AreaChartModel {
     AreaChartModel::new(build_dense_series(points))
 }
 
+pub fn build_stacked_area_model(
+    series_count: usize,
+    points_per_series: usize,
+) -> StackedAreaChartModel {
+    let x = shared_x(points_per_series);
+    let series = (0..series_count)
+        .map(|idx| build_dense_shared_series(x.clone(), idx))
+        .collect::<Vec<_>>();
+    StackedAreaChartModel::new(series).expect("stacked area model")
+}
+
 pub fn build_dense_bar_model(series_count: usize, points_per_series: usize) -> BarChartModel {
     let x = shared_x(points_per_series);
     let series = (0..series_count)
@@ -85,6 +98,26 @@ pub fn build_histogram_model(values: usize) -> HistogramChartModel {
         })
         .collect::<Vec<_>>();
     HistogramChartModel::new(samples).expect("histogram model")
+}
+
+pub fn build_statistics_model(
+    groups: usize,
+    values_per_group: usize,
+    mode: StatisticsMode,
+) -> StatisticsChartModel {
+    let data = (0..groups)
+        .map(|group| {
+            (0..values_per_group)
+                .map(|idx| {
+                    let t = idx as f32 * 0.071 + group as f32 * 0.19;
+                    group as f32 * 0.08 + t.sin() * 0.8 + (t * 0.37).cos() * 0.3
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut model = StatisticsChartModel::new(data).expect("statistics model");
+    model.style.mode = mode;
+    model
 }
 
 pub fn build_dense_multi_line_model(
@@ -176,7 +209,9 @@ pub fn build_funnel_model(stages: usize) -> FunnelChartModel {
 }
 
 pub fn build_polar_model(dimensions: usize, series_count: usize) -> PolarChartModel {
-    let dims = (0..dimensions).map(|idx| format!("D{idx}")).collect::<Vec<_>>();
+    let dims = (0..dimensions)
+        .map(|idx| format!("D{idx}"))
+        .collect::<Vec<_>>();
     let series = (0..series_count)
         .map(|series_idx| {
             (0..dimensions)
