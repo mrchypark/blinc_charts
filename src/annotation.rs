@@ -1,4 +1,4 @@
-use blinc_core::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
+use blinc_paint::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
 
 #[derive(Clone, Debug)]
 pub enum ChartAnnotation {

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Point, Rect, TextStyle};
 
 use crate::brush::BrushX;
 use crate::common::{draw_grid, fill_bg};

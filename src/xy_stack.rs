@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Rect};
 use blinc_layout::canvas::canvas;
 use blinc_layout::element::CursorStyle;
 use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Rect};
 
 use crate::input::{ChartInputBindings, DragAction};
 use crate::link::ChartLinkHandle;

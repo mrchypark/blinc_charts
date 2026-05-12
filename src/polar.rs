@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Path, Point, Stroke, TextStyle};
 use blinc_layout::canvas::canvas;
 use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Point, Stroke, TextStyle};
 
-use crate::common::{draw_grid, fill_bg};
+use crate::common::{closed_path_from_points, draw_grid, fill_bg};
 use crate::palette;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -269,11 +269,9 @@ impl PolarChartModel {
 
             if pts.len() >= 3 {
                 // Fill polygon
-                let mut path = Path::new().move_to(pts[0].x, pts[0].y);
-                for p in &pts[1..] {
-                    path = path.line_to(p.x, p.y);
-                }
-                path = path.close();
+                let Some(path) = closed_path_from_points(&pts) else {
+                    continue;
+                };
                 let c = self.series_color(s);
                 ctx.fill_path(
                     &path,

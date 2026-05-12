@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
 use blinc_layout::canvas::canvas;
 use blinc_layout::stack::stack;
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
 
-use crate::common::{draw_grid, fill_bg};
+use crate::common::{closed_path_from_points, draw_grid, fill_bg};
 use crate::palette;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -601,11 +601,9 @@ impl HierarchyChartModel {
                         let a = a0 + (a1 - a0) * t;
                         pts.push(Point::new(cx + r0 * a.cos(), cy + r0 * a.sin()));
                     }
-                    let mut path = Path::new().move_to(pts[0].x, pts[0].y);
-                    for p in &pts[1..] {
-                        path = path.line_to(p.x, p.y);
-                    }
-                    path = path.close();
+                    let Some(path) = closed_path_from_points(&pts) else {
+                        continue;
+                    };
                     ctx.fill_path(&path, Brush::Solid(self.leaf_color(leaf.depth, i)));
                 }
 

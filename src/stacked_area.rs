@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Path, PathCommand, Point, Rect, Stroke, TextStyle};
 
 use crate::brush::BrushX;
 use crate::common::{draw_grid, fill_bg};
@@ -102,7 +102,7 @@ pub struct StackedAreaChartModel {
     cached_sample_xs: Vec<f32>,
     cached_bottoms: Vec<f32>, // [s*sample_n + k]
     cached_tops: Vec<f32>,    // [s*sample_n + k]
-    cached_band_paths: Vec<blinc_core::Path>,
+    cached_band_paths: Vec<Path>,
     cached_top_pts: Vec<Vec<Point>>, // per-band polyline (px)
     scratch_vals: Vec<f32>,
 }
@@ -541,26 +541,28 @@ impl StackedAreaChartModel {
             let top_pts = &mut self.cached_top_pts[s];
             top_pts.reserve(sample_n);
 
-            let mut path: Option<blinc_core::Path> = None;
+            let mut commands = Vec::with_capacity(sample_n.saturating_mul(2).saturating_add(1));
             for (k, &x) in self.cached_sample_xs.iter().enumerate() {
                 let y = self.cached_tops[s * sample_n + k];
                 let p = self.view.data_to_px(Point::new(x, y), px, py, pw, ph);
                 top_pts.push(p);
-                path = Some(match path {
-                    None => blinc_core::Path::new().move_to(p.x, p.y),
-                    Some(prev) => prev.line_to(p.x, p.y),
-                });
+                if commands.is_empty() {
+                    commands.push(PathCommand::MoveTo(p));
+                } else {
+                    commands.push(PathCommand::LineTo(p));
+                }
             }
 
-            let Some(mut path) = path else {
+            if commands.is_empty() {
                 continue;
-            };
+            }
             for (k, &x) in self.cached_sample_xs.iter().enumerate().rev() {
                 let y = self.cached_bottoms[s * sample_n + k];
                 let p = self.view.data_to_px(Point::new(x, y), px, py, pw, ph);
-                path = path.line_to(p.x, p.y);
+                commands.push(PathCommand::LineTo(p));
             }
-            path = path.close();
+            commands.push(PathCommand::Close);
+            let path = Path::from_commands(commands);
             self.cached_band_paths.push(path);
         }
 

@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
-use blinc_core::{Brush, Color, DrawContext, Path, Point, Rect, Stroke, TextStyle};
 use blinc_layout::ElementBuilder;
+use blinc_paint::{Brush, Color, DrawContext, Point, Rect, Stroke, TextStyle};
 
 use crate::brush::BrushX;
-use crate::common::{draw_grid, fill_bg};
+use crate::common::{closed_path_from_points, draw_grid, fill_bg};
 use crate::view::{ChartView, Domain1D, Domain2D};
 use crate::xy_stack::InteractiveXChartModel;
 
@@ -430,14 +430,12 @@ impl StatisticsChartModel {
                         bot_pts.push(Point::new(xc - hw, y));
                     }
                     if !top_pts.is_empty() {
-                        let mut path = Path::new().move_to(top_pts[0].x, top_pts[0].y);
-                        for p in &top_pts[1..] {
-                            path = path.line_to(p.x, p.y);
-                        }
-                        for p in bot_pts.iter().rev() {
-                            path = path.line_to(p.x, p.y);
-                        }
-                        path = path.close();
+                        let mut band = Vec::with_capacity(top_pts.len() + bot_pts.len());
+                        band.extend(top_pts.iter().copied());
+                        band.extend(bot_pts.iter().rev().copied());
+                        let Some(path) = closed_path_from_points(&band) else {
+                            continue;
+                        };
                         ctx.fill_path(
                             &path,
                             Brush::Solid(Color::rgba(
@@ -494,14 +492,12 @@ impl StatisticsChartModel {
         }
 
         if self.style.mode == StatisticsMode::ErrorBand && mean_pts.len() >= 2 {
-            let mut path = Path::new().move_to(band_top[0].x, band_top[0].y);
-            for p in &band_top[1..] {
-                path = path.line_to(p.x, p.y);
-            }
-            for p in band_bot.iter().rev() {
-                path = path.line_to(p.x, p.y);
-            }
-            path = path.close();
+            let mut band = Vec::with_capacity(band_top.len() + band_bot.len());
+            band.extend(band_top.iter().copied());
+            band.extend(band_bot.iter().rev().copied());
+            let Some(path) = closed_path_from_points(&band) else {
+                return;
+            };
             ctx.fill_path(
                 &path,
                 Brush::Solid(Color::rgba(
