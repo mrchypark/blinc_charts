@@ -76,6 +76,15 @@ pub struct InteractionDemo {
     pub effect: &'static str,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoverageCase {
+    pub family: ChartFamily,
+    pub variant: &'static str,
+    pub interaction: &'static str,
+    pub task: String,
+    pub evidence: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InteractionDemoKind {
     XPanAndHover,
@@ -324,6 +333,30 @@ pub fn interaction_demo_inventory(family: ChartFamily) -> Vec<InteractionDemo> {
 
 pub fn gallery_tab_labels() -> Vec<&'static str> {
     TABS.iter().map(|tab| tab.label()).collect()
+}
+
+pub fn coverage_matrix() -> Vec<CoverageCase> {
+    let mut cases = Vec::new();
+    for sample in sample_inventory() {
+        for variant in sample.variants {
+            for interaction in interaction_demo_inventory(sample.family) {
+                cases.push(CoverageCase {
+                    family: sample.family,
+                    variant: variant.0,
+                    interaction: interaction.title,
+                    task: format!(
+                        "Using only the provided blinc_charts examples, write a Rust function that builds chart={} variant={} interaction={} and returns a Blinc element.",
+                        sample.title, variant.0, interaction.title
+                    ),
+                    evidence: format!(
+                        "{}\n{}\n{}\n{}\n{}",
+                        sample.code_snippet, variant.1, variant.2, interaction.code_change, interaction.effect
+                    ),
+                });
+            }
+        }
+    }
+    cases
 }
 
 pub fn build_interaction_examples_ui(family: ChartFamily) -> anyhow::Result<Div> {

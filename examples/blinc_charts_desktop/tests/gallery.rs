@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
 use blinc_charts_desktop::gallery::{
-    build_desktop_ui, build_interaction_examples_ui, desktop_window_config, gallery_tab_labels,
-    interaction_demo_inventory, sample_inventory, validate_sample_models, ChartFamily,
+    build_desktop_ui, build_interaction_examples_ui, coverage_matrix, desktop_window_config,
+    gallery_tab_labels, interaction_demo_inventory, sample_inventory, validate_sample_models,
+    ChartFamily,
 };
 
 #[test]
@@ -90,6 +91,48 @@ fn gallery_tabs_match_sample_sections() {
         gallery_tab_labels(),
         vec!["Example", "Code", "Variants", "Guide"]
     );
+}
+
+#[test]
+fn coverage_matrix_has_example_only_generation_tasks_for_each_family() {
+    let cases = coverage_matrix();
+    let covered_families: BTreeSet<_> = cases.iter().map(|case| case.family).collect();
+    let sample_families: BTreeSet<_> = sample_inventory()
+        .into_iter()
+        .map(|sample| sample.family)
+        .collect();
+
+    assert_eq!(covered_families, sample_families);
+    assert!(cases.len() >= sample_families.len());
+
+    for case in cases {
+        assert!(
+            case.task
+                .starts_with("Using only the provided blinc_charts examples"),
+            "case task must constrain mini-model input: {case:?}"
+        );
+        assert!(
+            !case.variant.is_empty() && !case.interaction.is_empty(),
+            "case must name variant and interaction: {case:?}"
+        );
+        assert!(
+            case.evidence.contains("Chart") || case.evidence.contains("chart"),
+            "case evidence should include chart construction clues: {case:?}"
+        );
+    }
+}
+
+#[test]
+fn coverage_matrix_families_build_runnable_interaction_ui() {
+    let families: BTreeSet<_> = coverage_matrix()
+        .into_iter()
+        .map(|case| case.family)
+        .collect();
+
+    for family in families {
+        let _ui: blinc_layout::div::Div = build_interaction_examples_ui(family)
+            .unwrap_or_else(|err| panic!("coverage matrix family {family:?} should build: {err}"));
+    }
 }
 
 #[test]
