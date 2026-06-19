@@ -1,9 +1,8 @@
 use std::collections::BTreeSet;
 
 use blinc_charts_desktop::gallery::{
-    build_desktop_ui, build_interaction_examples_ui, desktop_window_config,
-    gallery_pattern_inventory, interaction_demo_inventory, sample_inventory,
-    validate_sample_models, ChartFamily,
+    build_desktop_ui, build_interaction_examples_ui, desktop_window_config, gallery_tab_labels,
+    interaction_demo_inventory, sample_inventory, validate_sample_models, ChartFamily,
 };
 
 #[test]
@@ -86,37 +85,11 @@ fn sample_inventory_includes_detail_pane_metadata() {
 }
 
 #[test]
-fn gallery_guide_documents_borrowed_gallery_patterns() {
-    let patterns = gallery_pattern_inventory();
-    let combined = patterns
-        .iter()
-        .map(|pattern| {
-            format!(
-                "{} {} {}",
-                pattern.source, pattern.structure, pattern.adopted_as
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    assert!(patterns.len() >= 4);
-    for keyword in [
-        "Recharts",
-        "AG Charts",
-        "Nivo",
-        "Vega-Lite",
-        "ECharts",
-        "Chart.js",
-        "Example",
-        "Code",
-        "Variants",
-        "Guide",
-    ] {
-        assert!(
-            combined.contains(keyword),
-            "gallery guide should mention {keyword}"
-        );
-    }
+fn gallery_tabs_match_sample_sections() {
+    assert_eq!(
+        gallery_tab_labels(),
+        vec!["Example", "Code", "Variants", "Guide"]
+    );
 }
 
 #[test]

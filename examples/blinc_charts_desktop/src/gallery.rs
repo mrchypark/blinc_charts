@@ -77,13 +77,6 @@ pub struct InteractionDemo {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct GalleryPattern {
-    pub source: &'static str,
-    pub structure: &'static str,
-    pub adopted_as: &'static str,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InteractionDemoKind {
     XPanAndHover,
     XShiftBrush,
@@ -305,31 +298,6 @@ const TABS: &[GalleryTab] = &[
     GalleryTab::Explanation,
 ];
 
-const GALLERY_PATTERNS: &[GalleryPattern] = &[
-    GalleryPattern {
-        source: "Recharts / AG Charts",
-        structure: "Sidebar taxonomy by chart family and feature.",
-        adopted_as: "Left navigation groups every Blinc chart by the way users browse examples.",
-    },
-    GalleryPattern {
-        source: "Nivo",
-        structure:
-            "Each component page combines preview, code, data/options, and interaction knobs.",
-        adopted_as: "Every Blinc chart keeps Example, Code, Variants, and Guide tabs together.",
-    },
-    GalleryPattern {
-        source: "Vega-Lite / ECharts",
-        structure: "The runnable spec or options object is the primary artifact.",
-        adopted_as:
-            "Code and Variant cards name the exact model/style/binding change and its effect.",
-    },
-    GalleryPattern {
-        source: "Chart.js",
-        structure: "Action examples are executable, not just prose.",
-        adopted_as: "The Example tab lists live interaction cards below the main chart.",
-    },
-];
-
 pub fn sample_inventory() -> Vec<ChartSample> {
     EXAMPLES
         .iter()
@@ -354,8 +322,8 @@ pub fn interaction_demo_inventory(family: ChartFamily) -> Vec<InteractionDemo> {
         .collect()
 }
 
-pub fn gallery_pattern_inventory() -> &'static [GalleryPattern] {
-    GALLERY_PATTERNS
+pub fn gallery_tab_labels() -> Vec<&'static str> {
+    TABS.iter().map(|tab| tab.label()).collect()
 }
 
 pub fn build_interaction_examples_ui(family: ChartFamily) -> anyhow::Result<Div> {
@@ -690,8 +658,6 @@ fn example_tab(example: &GalleryExample, chart: Div, content_height: f32) -> any
             ("What to try", interaction_hint(example.family)),
             ("Budget note", budget_note(example.family)),
         ]))
-        .child(section_heading("Gallery structure"))
-        .child(gallery_structure_strip())
         .child(section_heading("Runnable interaction examples"))
         .child(interaction_examples_panel(example.family)?);
 
@@ -770,8 +736,6 @@ fn explanation_tab(family: ChartFamily, content_height: f32) -> Div {
         .h_fit()
         .flex_col()
         .gap_px(12.0)
-        .child(section_heading("Borrowed gallery patterns"))
-        .child(gallery_patterns_panel())
         .child(section_heading("How to read this chart"));
 
     for (title, body) in explanation_notes(family) {
@@ -1553,74 +1517,6 @@ fn info_grid(items: &[(&'static str, &'static str)]) -> Div {
         );
     }
     grid
-}
-
-fn gallery_structure_strip() -> Div {
-    let mut row = div().w_full().h_fit().flex_row().gap_px(10.0);
-    for pattern in GALLERY_PATTERNS.iter().take(3) {
-        row = row.child(
-            div()
-                .flex_1()
-                .h(118.0)
-                .rounded(8.0)
-                .bg(Color::rgba(0.070, 0.078, 0.094, 1.0))
-                .border(1.0, Color::rgba(1.0, 1.0, 1.0, 0.08))
-                .p_px(10.0)
-                .flex_col()
-                .gap_px(6.0)
-                .child(
-                    text(pattern.source)
-                        .size(11.0)
-                        .color(Color::rgba(0.95, 0.67, 0.33, 1.0)),
-                )
-                .child(
-                    text(pattern.structure)
-                        .size(12.0)
-                        .color(Color::rgba(0.82, 0.87, 0.92, 1.0)),
-                )
-                .child(
-                    text(pattern.adopted_as)
-                        .size(11.0)
-                        .color(Color::rgba(0.62, 0.68, 0.74, 1.0)),
-                ),
-        );
-    }
-    row
-}
-
-fn gallery_patterns_panel() -> Div {
-    let mut panel = div().w_full().h_fit().flex_col().gap_px(10.0);
-    for pattern in GALLERY_PATTERNS {
-        panel = panel.child(pattern_card(*pattern));
-    }
-    panel
-}
-
-fn pattern_card(pattern: GalleryPattern) -> Div {
-    div()
-        .w_full()
-        .h_fit()
-        .rounded(8.0)
-        .bg(Color::rgba(0.070, 0.078, 0.094, 1.0))
-        .border(1.0, Color::rgba(1.0, 1.0, 1.0, 0.08))
-        .p_px(12.0)
-        .flex_col()
-        .gap_px(7.0)
-        .child(
-            text(pattern.source)
-                .size(14.0)
-                .color(Color::rgba(0.94, 0.97, 1.0, 1.0)),
-        )
-        .child(
-            text(pattern.structure)
-                .size(12.0)
-                .color(Color::rgba(0.74, 0.79, 0.85, 1.0)),
-        )
-        .child(
-            text(pattern.adopted_as)
-                .size(12.0)
-                .color(Color::rgba(0.74, 0.79, 0.85, 1.0)),
-        )
 }
 
 fn section_heading(label: &'static str) -> Div {
