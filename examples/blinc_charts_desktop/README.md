@@ -14,9 +14,9 @@ cargo test --manifest-path examples/blinc_charts_desktop/Cargo.toml
 ```
 
 The tests also build the gallery coverage matrix used for mini-model eval
-prompts: every supported chart family gets example-only task/evidence text and
-a runnable interaction UI builder. They do not call an AI model or open a
-window.
+prompts: every supported chart family gets example-only task/evidence text, and
+every documented variant x interaction row is compiled into a public
+`blinc_charts` element builder. They do not call an AI model or open a window.
 
 ## Run
 
