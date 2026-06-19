@@ -827,6 +827,11 @@ impl NetworkChartHandle {
 }
 
 pub fn network_chart(handle: NetworkChartHandle) -> impl ElementBuilder {
+    let scroll_zoom = handle
+        .0
+        .lock()
+        .map(|m| m.style.scroll_zoom_factor > 0.0)
+        .unwrap_or(true);
     let model_plot = handle.0.clone();
     let model_overlay = handle.0.clone();
 
@@ -836,7 +841,7 @@ pub fn network_chart(handle: NetworkChartHandle) -> impl ElementBuilder {
     let model_drag = handle.0.clone();
     let model_drag_end = handle.0.clone();
 
-    stack()
+    let mut chart = stack()
         .w_full()
         .h_full()
         .overflow_clip()
@@ -846,8 +851,10 @@ pub fn network_chart(handle: NetworkChartHandle) -> impl ElementBuilder {
                 m.on_mouse_move(e.local_x, e.local_y, e.bounds_width, e.bounds_height);
                 blinc_layout::stateful::request_redraw();
             }
-        })
-        .on_scroll(move |e| {
+        });
+
+    if scroll_zoom {
+        chart = chart.on_scroll(move |e| {
             if let Ok(mut m) = model_scroll.lock() {
                 m.on_scroll(
                     e.scroll_delta_y,
@@ -858,7 +865,10 @@ pub fn network_chart(handle: NetworkChartHandle) -> impl ElementBuilder {
                 );
                 blinc_layout::stateful::request_redraw();
             }
-        })
+        });
+    }
+
+    chart
         .on_pinch(move |e| {
             if let Ok(mut m) = model_pinch.lock() {
                 m.on_pinch(

@@ -16,6 +16,18 @@ jobs:
         run: cargo check
       - name: Cargo test
         run: cargo test
+      - name: Example frontend check
+        run: cargo check --manifest-path examples/blinc_charts_frontend/Cargo.toml
+      - name: Example frontend test
+        run: cargo test --manifest-path examples/blinc_charts_frontend/Cargo.toml
+      - name: Example desktop check
+        run: cargo check --manifest-path examples/blinc_charts_desktop/Cargo.toml
+      - name: Example desktop test
+        run: cargo test --manifest-path examples/blinc_charts_desktop/Cargo.toml
+      - name: Install wasm target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Example frontend wasm check
+        run: cargo check --manifest-path examples/blinc_charts_frontend/Cargo.toml --target wasm32-unknown-unknown
 
   benchmarks:
     runs-on: ubuntu-latest

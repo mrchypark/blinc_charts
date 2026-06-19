@@ -1,0 +1,16 @@
+[package]
+name = "blinc_charts_desktop"
+description = "Blinc native desktop gallery for blinc_charts"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+blinc_app = { git = "https://github.com/mrchypark/Blinc.git", rev = "b9b0c2b01b15cfeaed1de5820e21c76823402fda", package = "blinc_app", default-features = false, features = ["windowed"] }
+blinc_charts = { path = "../.." }
+blinc_core = { git = "https://github.com/mrchypark/Blinc.git", rev = "b9b0c2b01b15cfeaed1de5820e21c76823402fda", package = "blinc_core" }
+blinc_layout = { git = "https://github.com/mrchypark/Blinc.git", rev = "b9b0c2b01b15cfeaed1de5820e21c76823402fda", package = "blinc_layout" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

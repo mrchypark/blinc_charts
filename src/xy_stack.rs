@@ -189,7 +189,7 @@ pub(crate) fn x_chart<M: InteractiveXChartModel>(
     let model_up = handle.clone();
     let model_drag_end = handle.clone();
 
-    stack()
+    let mut chart = stack()
         .w_full()
         .h_full()
         .overflow_clip()
@@ -215,8 +215,10 @@ pub(crate) fn x_chart<M: InteractiveXChartModel>(
                     blinc_layout::stateful::request_redraw();
                 }
             }
-        })
-        .on_scroll(move |e| {
+        });
+
+    if bindings.scroll_zoom {
+        chart = chart.on_scroll(move |e| {
             if let Ok(mut m) = model_scroll.lock() {
                 let damage =
                     m.scroll_damage(e.scroll_delta_y, e.local_x, e.bounds_width, e.bounds_height);
@@ -224,7 +226,10 @@ pub(crate) fn x_chart<M: InteractiveXChartModel>(
                     blinc_layout::stateful::request_redraw();
                 }
             }
-        })
+        });
+    }
+
+    chart
         .on_pinch(move |e| {
             if let Ok(mut m) = model_pinch.lock() {
                 let damage =
@@ -315,7 +320,7 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
     let link_plot = link.clone();
     let link_overlay = link.clone();
 
-    stack()
+    let mut chart = stack()
         .w_full()
         .h_full()
         .overflow_clip()
@@ -352,8 +357,10 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
                     blinc_layout::stateful::request_redraw();
                 }
             }
-        })
-        .on_scroll(move |e| {
+        });
+
+    if bindings.scroll_zoom {
+        chart = chart.on_scroll(move |e| {
             if let (Ok(mut l), Ok(mut m)) = (link_scroll.lock(), model_scroll.lock()) {
                 m.view_mut().domain.x = l.x_domain;
                 let damage =
@@ -363,7 +370,10 @@ pub(crate) fn linked_x_chart<M: InteractiveXChartModel>(
                     blinc_layout::stateful::request_redraw();
                 }
             }
-        })
+        });
+    }
+
+    chart
         .on_pinch(move |e| {
             if let (Ok(mut l), Ok(mut m)) = (link_pinch.lock(), model_pinch.lock()) {
                 m.view_mut().domain.x = l.x_domain;

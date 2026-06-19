@@ -1,2 +1,4 @@
 /target
 Cargo.lock
+!examples/blinc_charts_frontend/Cargo.lock
+!examples/blinc_charts_desktop/Cargo.lock

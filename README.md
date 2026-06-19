@@ -29,6 +29,44 @@ cargo check --benches
 cargo bench --bench cartesian_render -- --noplot
 ```
 
+## Example Frontend
+
+A complete Blinc web/WASM gallery lives in
+[`examples/blinc_charts_frontend`](examples/blinc_charts_frontend). It uses the
+real `blinc_charts` models, handles, linked chart APIs, and Blinc layout
+elements.
+
+```bash
+cargo check --manifest-path examples/blinc_charts_frontend/Cargo.toml
+cargo test --manifest-path examples/blinc_charts_frontend/Cargo.toml
+```
+
+To run it in a browser, build the wasm package and serve the example directory:
+
+```bash
+cd examples/blinc_charts_frontend
+wasm-pack build --target web --release
+./serve.sh
+```
+
+## Example Desktop
+
+A native Blinc windowed gallery lives in
+[`examples/blinc_charts_desktop`](examples/blinc_charts_desktop). It shares
+host-testable sample/model/UI construction code and uses the real
+`blinc_app::windowed::WindowedApp` entrypoint.
+
+```bash
+cargo check --manifest-path examples/blinc_charts_desktop/Cargo.toml
+cargo test --manifest-path examples/blinc_charts_desktop/Cargo.toml
+```
+
+Run it from a desktop session with GPU/window access:
+
+```bash
+cargo run --manifest-path examples/blinc_charts_desktop/Cargo.toml --release
+```
+
 ## Performance Budgets
 
 Benchmarks are now split by concern instead of living in a single `line_render` harness.
