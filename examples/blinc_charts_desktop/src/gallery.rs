@@ -77,6 +77,13 @@ pub struct InteractionDemo {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GalleryPattern {
+    pub source: &'static str,
+    pub structure: &'static str,
+    pub adopted_as: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InteractionDemoKind {
     XPanAndHover,
     XShiftBrush,
@@ -298,6 +305,31 @@ const TABS: &[GalleryTab] = &[
     GalleryTab::Explanation,
 ];
 
+const GALLERY_PATTERNS: &[GalleryPattern] = &[
+    GalleryPattern {
+        source: "Recharts / AG Charts",
+        structure: "Sidebar taxonomy by chart family and feature.",
+        adopted_as: "Left navigation groups every Blinc chart by the way users browse examples.",
+    },
+    GalleryPattern {
+        source: "Nivo",
+        structure:
+            "Each component page combines preview, code, data/options, and interaction knobs.",
+        adopted_as: "Every Blinc chart keeps Example, Code, Variants, and Guide tabs together.",
+    },
+    GalleryPattern {
+        source: "Vega-Lite / ECharts",
+        structure: "The runnable spec or options object is the primary artifact.",
+        adopted_as:
+            "Code and Variant cards name the exact model/style/binding change and its effect.",
+    },
+    GalleryPattern {
+        source: "Chart.js",
+        structure: "Action examples are executable, not just prose.",
+        adopted_as: "The Example tab lists live interaction cards below the main chart.",
+    },
+];
+
 pub fn sample_inventory() -> Vec<ChartSample> {
     EXAMPLES
         .iter()
@@ -320,6 +352,10 @@ pub fn interaction_demo_inventory(family: ChartFamily) -> Vec<InteractionDemo> {
         .into_iter()
         .map(|entry| entry.spec)
         .collect()
+}
+
+pub fn gallery_pattern_inventory() -> &'static [GalleryPattern] {
+    GALLERY_PATTERNS
 }
 
 pub fn build_interaction_examples_ui(family: ChartFamily) -> anyhow::Result<Div> {
@@ -538,9 +574,9 @@ fn detail_pane(
         GalleryTab::Example | GalleryTab::Interactions => {
             example_tab(example, chart, content_height)?
         }
-        GalleryTab::Code => code_tab(example.family),
-        GalleryTab::Variants => variants_tab(example.family),
-        GalleryTab::Explanation => explanation_tab(example.family),
+        GalleryTab::Code => code_tab(example.family, content_height),
+        GalleryTab::Variants => variants_tab(example.family, content_height),
+        GalleryTab::Explanation => explanation_tab(example.family, content_height),
     };
 
     Ok(div()
@@ -654,22 +690,28 @@ fn example_tab(example: &GalleryExample, chart: Div, content_height: f32) -> any
             ("What to try", interaction_hint(example.family)),
             ("Budget note", budget_note(example.family)),
         ]))
+        .child(section_heading("Gallery structure"))
+        .child(gallery_structure_strip())
         .child(section_heading("Runnable interaction examples"))
         .child(interaction_examples_panel(example.family)?);
 
-    Ok(div().w_full().flex_1().child(
+    Ok(scroll_tab(content_height, panel))
+}
+
+fn scroll_tab(content_height: f32, content: Div) -> Div {
+    div().w_full().flex_1().child(
         scroll_no_bounce()
             .w_full()
             .h(content_height)
             .vertical()
-            .child(panel),
-    ))
+            .child(content),
+    )
 }
 
-fn code_tab(family: ChartFamily) -> Div {
-    div()
+fn code_tab(family: ChartFamily, content_height: f32) -> Div {
+    let panel = div()
         .w_full()
-        .flex_1()
+        .h_fit()
         .flex_col()
         .gap_px(12.0)
         .child(section_heading("Minimal Rust setup"))
@@ -680,19 +722,32 @@ fn code_tab(family: ChartFamily) -> Div {
                 .code_bg(Color::rgba(0.035, 0.040, 0.048, 1.0))
                 .rounded(8.0),
         )
+        .child(section_heading("Code layers"))
+        .child(info_grid(&[
+            ("Model", constructor_note(family)),
+            ("Variant", "Change one style or mode field, then compare the rendered effect."),
+            ("Binding", "Change ChartInputBindings only when the gesture contract changes."),
+        ]))
         .child(info_grid(&[
             ("Constructor", constructor_note(family)),
             ("Handle", "Wrap the model in the matching *ChartHandle so Blinc can render and mutate it safely."),
             ("Element", "Pass the handle to *_chart(handle), or to linked_*_chart(handle, chart_link) for shared X state."),
-        ]))
+        ]));
+
+    scroll_tab(content_height, panel)
 }
 
-fn variants_tab(family: ChartFamily) -> Div {
-    let mut panel = div().w_full().flex_1().flex_col().gap_px(10.0);
+fn variants_tab(family: ChartFamily, content_height: f32) -> Div {
+    let mut panel = div()
+        .w_full()
+        .h_fit()
+        .flex_col()
+        .gap_px(10.0)
+        .child(section_heading("Code variance meanings"));
     for variant in variant_notes(family) {
         panel = panel.child(variant_card(variant.0, variant.1, variant.2));
     }
-    panel
+    scroll_tab(content_height, panel)
 }
 
 fn interaction_examples_panel(family: ChartFamily) -> anyhow::Result<Div> {
@@ -709,18 +764,20 @@ fn interaction_examples_panel(family: ChartFamily) -> anyhow::Result<Div> {
     Ok(panel)
 }
 
-fn explanation_tab(family: ChartFamily) -> Div {
+fn explanation_tab(family: ChartFamily, content_height: f32) -> Div {
     let mut panel = div()
         .w_full()
-        .flex_1()
+        .h_fit()
         .flex_col()
         .gap_px(12.0)
+        .child(section_heading("Borrowed gallery patterns"))
+        .child(gallery_patterns_panel())
         .child(section_heading("How to read this chart"));
 
     for (title, body) in explanation_notes(family) {
         panel = panel.child(body_block(title, body));
     }
-    panel
+    scroll_tab(content_height, panel)
 }
 
 fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
@@ -1498,6 +1555,74 @@ fn info_grid(items: &[(&'static str, &'static str)]) -> Div {
     grid
 }
 
+fn gallery_structure_strip() -> Div {
+    let mut row = div().w_full().h_fit().flex_row().gap_px(10.0);
+    for pattern in GALLERY_PATTERNS.iter().take(3) {
+        row = row.child(
+            div()
+                .flex_1()
+                .h(118.0)
+                .rounded(8.0)
+                .bg(Color::rgba(0.070, 0.078, 0.094, 1.0))
+                .border(1.0, Color::rgba(1.0, 1.0, 1.0, 0.08))
+                .p_px(10.0)
+                .flex_col()
+                .gap_px(6.0)
+                .child(
+                    text(pattern.source)
+                        .size(11.0)
+                        .color(Color::rgba(0.95, 0.67, 0.33, 1.0)),
+                )
+                .child(
+                    text(pattern.structure)
+                        .size(12.0)
+                        .color(Color::rgba(0.82, 0.87, 0.92, 1.0)),
+                )
+                .child(
+                    text(pattern.adopted_as)
+                        .size(11.0)
+                        .color(Color::rgba(0.62, 0.68, 0.74, 1.0)),
+                ),
+        );
+    }
+    row
+}
+
+fn gallery_patterns_panel() -> Div {
+    let mut panel = div().w_full().h_fit().flex_col().gap_px(10.0);
+    for pattern in GALLERY_PATTERNS {
+        panel = panel.child(pattern_card(*pattern));
+    }
+    panel
+}
+
+fn pattern_card(pattern: GalleryPattern) -> Div {
+    div()
+        .w_full()
+        .h_fit()
+        .rounded(8.0)
+        .bg(Color::rgba(0.070, 0.078, 0.094, 1.0))
+        .border(1.0, Color::rgba(1.0, 1.0, 1.0, 0.08))
+        .p_px(12.0)
+        .flex_col()
+        .gap_px(7.0)
+        .child(
+            text(pattern.source)
+                .size(14.0)
+                .color(Color::rgba(0.94, 0.97, 1.0, 1.0)),
+        )
+        .child(
+            text(pattern.structure)
+                .size(12.0)
+                .color(Color::rgba(0.74, 0.79, 0.85, 1.0)),
+        )
+        .child(
+            text(pattern.adopted_as)
+                .size(12.0)
+                .color(Color::rgba(0.74, 0.79, 0.85, 1.0)),
+        )
+}
+
 fn section_heading(label: &'static str) -> Div {
     div().w_full().h_fit().child(
         text(label)
@@ -1534,9 +1659,9 @@ fn variant_card(name: &'static str, code_change: &'static str, effect: &'static 
 }
 
 fn body_block(title: &'static str, body: &'static [&'static str]) -> Div {
-    div()
+    let mut block = div()
         .w_full()
-        .h_fit()
+        .h(86.0)
         .rounded(8.0)
         .bg(Color::rgba(0.070, 0.078, 0.094, 1.0))
         .border(1.0, Color::rgba(1.0, 1.0, 1.0, 0.08))
@@ -1544,15 +1669,24 @@ fn body_block(title: &'static str, body: &'static [&'static str]) -> Div {
         .flex_col()
         .gap_px(7.0)
         .child(
-            text(title)
-                .size(14.0)
-                .color(Color::rgba(0.94, 0.97, 1.0, 1.0)),
-        )
-        .children(body.iter().map(|line| {
-            text(*line)
-                .size(12.0)
-                .color(Color::rgba(0.74, 0.79, 0.85, 1.0))
-        }))
+            div().w_full().h(18.0).child(
+                text(title)
+                    .size(14.0)
+                    .color(Color::rgba(0.94, 0.97, 1.0, 1.0)),
+            ),
+        );
+
+    for line in body {
+        block = block.child(
+            div().w_full().h(16.0).child(
+                text(*line)
+                    .size(12.0)
+                    .color(Color::rgba(0.74, 0.79, 0.85, 1.0)),
+            ),
+        );
+    }
+
+    block
 }
 
 impl GalleryGroup {
@@ -1575,7 +1709,7 @@ impl GalleryTab {
             GalleryTab::Code => "Code",
             GalleryTab::Variants => "Variants",
             GalleryTab::Interactions => "Interactions",
-            GalleryTab::Explanation => "Explanation",
+            GalleryTab::Explanation => "Guide",
         }
     }
 }
