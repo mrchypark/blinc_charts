@@ -80,7 +80,11 @@ pub struct InteractionDemo {
 pub struct CoverageCase {
     pub family: ChartFamily,
     pub variant: &'static str,
+    pub variant_code: &'static str,
+    pub variant_effect: &'static str,
     pub interaction: &'static str,
+    pub interaction_code: &'static str,
+    pub interaction_effect: &'static str,
     pub task: String,
     pub evidence: String,
 }
@@ -343,7 +347,11 @@ pub fn coverage_matrix() -> Vec<CoverageCase> {
                 cases.push(CoverageCase {
                     family: sample.family,
                     variant: variant.0,
+                    variant_code: variant.1,
+                    variant_effect: variant.2,
                     interaction: interaction.title,
+                    interaction_code: interaction.code_change,
+                    interaction_effect: interaction.effect,
                     task: format!(
                         "Using only the provided blinc_charts examples, write a Rust function that builds chart={} variant={} interaction={} and returns a Blinc element.",
                         sample.title, variant.0, interaction.title

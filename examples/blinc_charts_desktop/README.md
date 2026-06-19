@@ -18,6 +18,18 @@ prompts: every supported chart family gets example-only task/evidence text, and
 every documented variant x interaction row is compiled into a public
 `blinc_charts` element builder. They do not call an AI model or open a window.
 
+## Mini-Model Eval
+
+```bash
+python3 scripts/run_mini_gallery_eval.py --dry-run
+OPENAI_API_KEY=... python3 scripts/run_mini_gallery_eval.py
+```
+
+The runner exports the desktop coverage matrix, gives the model only gallery
+snippets/variant notes/interaction notes, writes generated Rust cases under
+`target/blinc_charts_mini_eval`, then checks them with `cargo check --tests`.
+Results are written to `summary.json`, `results.jsonl`, and `cargo_check.log`.
+
 ## Run
 
 ```bash
