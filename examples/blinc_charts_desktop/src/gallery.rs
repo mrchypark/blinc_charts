@@ -281,7 +281,7 @@ const EXAMPLES: &[GalleryExample] = &[
         family: ChartFamily::Hierarchy,
         group: GalleryGroup::Structure,
         title: "Hierarchy",
-        summary: "Tree data rendered as treemap, icicle, sunburst, or packing layouts.",
+        summary: "Portfolio tree weights rendered as sunburst, treemap, icicle, or packing layouts.",
         points: 13,
         api: &["HierarchyNode", "HierarchyChartModel", "HierarchyMode"],
         interactions: &["hover leaf", "layout mode variants", "leaf cap"],
@@ -938,7 +938,7 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
         ChartFamily::Hierarchy => {
             let mut model =
                 HierarchyChartModel::new(hierarchy_root()).context("hierarchy chart")?;
-            model.style.mode = HierarchyMode::Treemap;
+            model.style.mode = HierarchyMode::Sunburst;
             chart_surface(hierarchy_chart(HierarchyChartHandle::new(model)))
         }
         ChartFamily::Network => {
@@ -1531,7 +1531,7 @@ fn hover_only_family_chart(family: ChartFamily) -> anyhow::Result<Div> {
         }
         ChartFamily::Hierarchy => {
             let mut model = HierarchyChartModel::new(hierarchy_root()).context("hierarchy demo")?;
-            model.style.mode = HierarchyMode::Treemap;
+            model.style.mode = HierarchyMode::Sunburst;
             Ok(chart_surface(hierarchy_chart(HierarchyChartHandle::new(
                 model,
             ))))
@@ -1922,7 +1922,7 @@ geo_chart(GeoChartHandle::new(model))"#
         }
         ChartFamily::Hierarchy => {
             r#"let mut model = HierarchyChartModel::new(root)?;
-model.style.mode = HierarchyMode::Treemap;
+model.style.mode = HierarchyMode::Sunburst;
 hierarchy_chart(HierarchyChartHandle::new(model))"#
         }
         ChartFamily::Network => {
