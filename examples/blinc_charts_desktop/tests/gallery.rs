@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use blinc_charts_desktop::gallery::{
     build_desktop_ui, build_interaction_examples_ui, coverage_matrix, desktop_window_config,
-    gallery_tab_labels, interaction_demo_inventory, sample_inventory, validate_sample_models,
-    ChartFamily,
+    gallery_tab_labels, hierarchy_example_mode_labels, interaction_demo_inventory,
+    sample_inventory, validate_sample_models, ChartFamily,
 };
 
 #[test]
@@ -90,6 +90,14 @@ fn gallery_tabs_match_sample_sections() {
     assert_eq!(
         gallery_tab_labels(),
         vec!["Example", "Code", "Variants", "Guide"]
+    );
+}
+
+#[test]
+fn hierarchy_example_shows_each_layout_mode() {
+    assert_eq!(
+        hierarchy_example_mode_labels(),
+        vec!["Icicle", "Treemap", "Sunburst", "Packing"]
     );
 }
 

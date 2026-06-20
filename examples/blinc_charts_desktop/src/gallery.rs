@@ -281,7 +281,7 @@ const EXAMPLES: &[GalleryExample] = &[
         family: ChartFamily::Hierarchy,
         group: GalleryGroup::Structure,
         title: "Hierarchy",
-        summary: "Portfolio tree weights rendered as sunburst, treemap, icicle, or packing layouts.",
+        summary: "Portfolio tree weights rendered as icicle, treemap, sunburst, or packing layouts.",
         points: 13,
         api: &["HierarchyNode", "HierarchyChartModel", "HierarchyMode"],
         interactions: &["hover leaf", "layout mode variants", "leaf cap"],
@@ -367,6 +367,13 @@ pub fn coverage_matrix() -> Vec<CoverageCase> {
         }
     }
     cases
+}
+
+pub fn hierarchy_example_mode_labels() -> Vec<&'static str> {
+    hierarchy_layout_examples()
+        .iter()
+        .map(|(_, label, _, _)| *label)
+        .collect()
 }
 
 pub fn build_interaction_examples_ui(family: ChartFamily) -> anyhow::Result<Div> {
@@ -697,11 +704,11 @@ fn example_tab(
         .flex_col()
         .gap_px(12.0)
         .p_px(2.0)
-        .child(main_example_card(
-            example.family,
-            chart,
-            open_code_state.clone(),
-        ))
+        .child(if example.family == ChartFamily::Hierarchy {
+            hierarchy_layout_examples_panel(open_code_state.clone())?
+        } else {
+            main_example_card(example.family, chart, open_code_state.clone())
+        })
         .child(info_grid(&[
             ("Data shape", data_shape(example.family)),
             ("What to try", interaction_hint(example.family)),
@@ -732,6 +739,70 @@ fn main_example_card(
             "main-example",
             "Example code",
             code_snippet(family),
+            open_code_state,
+        ))
+}
+
+fn hierarchy_layout_examples_panel(open_code_state: Option<State<String>>) -> anyhow::Result<Div> {
+    let mut panel = div()
+        .w_full()
+        .h_fit()
+        .flex_col()
+        .gap_px(12.0)
+        .child(section_heading("Hierarchy layout modes"));
+
+    for (mode, label, code_change, effect) in hierarchy_layout_examples() {
+        panel = panel.child(hierarchy_layout_card(
+            label,
+            code_change,
+            effect,
+            hierarchy_chart_for_mode(mode)
+                .with_context(|| format!("hierarchy {label} example"))?,
+            open_code_state.clone(),
+        ));
+    }
+
+    Ok(panel)
+}
+
+fn hierarchy_layout_card(
+    label: &'static str,
+    code_change: &'static str,
+    effect: &'static str,
+    chart: Div,
+    open_code_state: Option<State<String>>,
+) -> Div {
+    div()
+        .w_full()
+        .h_fit()
+        .rounded(8.0)
+        .border(1.0, Color::rgba(1.0, 1.0, 1.0, 0.10))
+        .bg(Color::rgba(0.075, 0.083, 0.100, 1.0))
+        .p_px(10.0)
+        .flex_col()
+        .gap_px(10.0)
+        .child(
+            div()
+                .w_full()
+                .h_fit()
+                .flex_col()
+                .gap_px(5.0)
+                .child(
+                    text(label)
+                        .size(16.0)
+                        .color(Color::rgba(0.94, 0.97, 1.0, 1.0)),
+                )
+                .child(
+                    text(effect)
+                        .size(12.0)
+                        .color(Color::rgba(0.74, 0.79, 0.85, 1.0)),
+                ),
+        )
+        .child(framed_chart(chart))
+        .child(collapsible_code_panel(
+            label,
+            "Example code",
+            code_change,
             open_code_state,
         ))
 }
@@ -938,7 +1009,7 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
         ChartFamily::Hierarchy => {
             let mut model =
                 HierarchyChartModel::new(hierarchy_root()).context("hierarchy chart")?;
-            model.style.mode = HierarchyMode::Sunburst;
+            model.style.mode = HierarchyMode::Icicle;
             chart_surface(hierarchy_chart(HierarchyChartHandle::new(model)))
         }
         ChartFamily::Network => {
@@ -948,6 +1019,14 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
             chart_surface(network_chart(NetworkChartHandle::new(model)))
         }
     })
+}
+
+fn hierarchy_chart_for_mode(mode: HierarchyMode) -> anyhow::Result<Div> {
+    let mut model = HierarchyChartModel::new(hierarchy_root()).context("hierarchy chart")?;
+    model.style.mode = mode;
+    Ok(chart_surface(hierarchy_chart(HierarchyChartHandle::new(
+        model,
+    ))))
 }
 
 fn chart_surface(chart: impl ElementBuilder + 'static) -> Div {
@@ -1531,7 +1610,7 @@ fn hover_only_family_chart(family: ChartFamily) -> anyhow::Result<Div> {
         }
         ChartFamily::Hierarchy => {
             let mut model = HierarchyChartModel::new(hierarchy_root()).context("hierarchy demo")?;
-            model.style.mode = HierarchyMode::Sunburst;
+            model.style.mode = HierarchyMode::Icicle;
             Ok(chart_surface(hierarchy_chart(HierarchyChartHandle::new(
                 model,
             ))))
@@ -1922,7 +2001,7 @@ geo_chart(GeoChartHandle::new(model))"#
         }
         ChartFamily::Hierarchy => {
             r#"let mut model = HierarchyChartModel::new(root)?;
-model.style.mode = HierarchyMode::Sunburst;
+model.style.mode = HierarchyMode::Icicle;
 hierarchy_chart(HierarchyChartHandle::new(model))"#
         }
         ChartFamily::Network => {
@@ -1993,6 +2072,11 @@ fn variant_notes(family: ChartFamily) -> &'static [(&'static str, &'static str, 
             ),
         ],
         ChartFamily::Hierarchy => &[
+            (
+                "Icicle",
+                "model.style.mode = HierarchyMode::Icicle",
+                "Shows tree depth as stacked horizontal bands without the donut shape.",
+            ),
             (
                 "Treemap",
                 "model.style.mode = HierarchyMode::Treemap",
@@ -2109,6 +2193,35 @@ fn variant_notes(family: ChartFamily) -> &'static [(&'static str, &'static str, 
             ),
         ],
     }
+}
+
+fn hierarchy_layout_examples() -> [(HierarchyMode, &'static str, &'static str, &'static str); 4] {
+    [
+        (
+            HierarchyMode::Icicle,
+            "Icicle",
+            "model.style.mode = HierarchyMode::Icicle",
+            "Shows tree depth as stacked horizontal bands without the donut shape.",
+        ),
+        (
+            HierarchyMode::Treemap,
+            "Treemap",
+            "model.style.mode = HierarchyMode::Treemap",
+            "Optimizes screen usage for leaf weight comparison.",
+        ),
+        (
+            HierarchyMode::Sunburst,
+            "Sunburst",
+            "model.style.mode = HierarchyMode::Sunburst",
+            "Makes parent-child depth visually explicit in radial bands.",
+        ),
+        (
+            HierarchyMode::Packing,
+            "Packing",
+            "model.style.mode = HierarchyMode::Packing",
+            "Shows clusters as nested circle-like regions.",
+        ),
+    ]
 }
 
 fn interaction_notes(family: ChartFamily) -> &'static [(&'static str, &'static str, &'static str)] {

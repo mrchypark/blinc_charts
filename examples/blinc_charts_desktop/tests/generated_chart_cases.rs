@@ -444,6 +444,7 @@ fn hierarchy(variant: &str) -> anyhow::Result<blinc_layout::div::Div> {
     let mut model = HierarchyChartModel::new(root)?;
     match variant {
         "Treemap" => model.style.mode = HierarchyMode::Treemap,
+        "Icicle" => model.style.mode = HierarchyMode::Icicle,
         "Sunburst" => model.style.mode = HierarchyMode::Sunburst,
         "Packing" => model.style.mode = HierarchyMode::Packing,
         _ => {}
