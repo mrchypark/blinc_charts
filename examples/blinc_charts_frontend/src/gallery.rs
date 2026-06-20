@@ -207,6 +207,7 @@ pub fn build_gallery_ui() -> anyhow::Result<Div> {
     let funnel = FunnelChartModel::new(funnel_stages()).context("funnel chart")?;
     let polar =
         PolarChartModel::new_radar(polar_dimensions(), polar_series()).context("polar chart")?;
+    let page_bindings = page_chart_bindings();
 
     let content = div()
         .w_full()
@@ -219,17 +220,25 @@ pub fn build_gallery_ui() -> anyhow::Result<Div> {
         .child(chart_card(
             "Line",
             interaction_hint(ChartFamily::LinkedLine),
-            linked_line_chart(LineChartHandle::new(line), link.clone()),
+            linked_line_chart_with_bindings(
+                LineChartHandle::new(line),
+                link.clone(),
+                page_bindings,
+            ),
         ))
         .child(chart_card(
             "Area",
             interaction_hint(ChartFamily::LinkedArea),
-            linked_area_chart(AreaChartHandle::new(area), link.clone()),
+            linked_area_chart_with_bindings(
+                AreaChartHandle::new(area),
+                link.clone(),
+                page_bindings,
+            ),
         ))
         .child(chart_card(
             "Bar",
             interaction_hint(ChartFamily::LinkedBar),
-            linked_bar_chart(BarChartHandle::new(bar), link),
+            linked_bar_chart_with_bindings(BarChartHandle::new(bar), link, page_bindings),
         ))
         .child(section_label("Additional chart models"))
         .child(chart_card(
@@ -240,17 +249,17 @@ pub fn build_gallery_ui() -> anyhow::Result<Div> {
         .child(chart_card(
             "Candlestick",
             interaction_hint(ChartFamily::Candlestick),
-            candlestick_chart(CandlestickChartHandle::new(candles)),
+            candlestick_chart_with_bindings(CandlestickChartHandle::new(candles), page_bindings),
         ))
         .child(chart_card(
             "Histogram",
             interaction_hint(ChartFamily::Histogram),
-            histogram_chart(HistogramChartHandle::new(histogram)),
+            histogram_chart_with_bindings(HistogramChartHandle::new(histogram), page_bindings),
         ))
         .child(chart_card(
             "Statistics",
             interaction_hint(ChartFamily::Statistics),
-            statistics_chart(StatisticsChartHandle::new(statistics)),
+            statistics_chart_with_bindings(StatisticsChartHandle::new(statistics), page_bindings),
         ))
         .child(chart_card(
             "Gauge",
@@ -273,6 +282,13 @@ pub fn build_gallery_ui() -> anyhow::Result<Div> {
         .h_full()
         .bg(Color::rgba(0.04, 0.05, 0.07, 1.0))
         .child(scroll_no_bounce().w_full().h_full().child(content)))
+}
+
+fn page_chart_bindings() -> ChartInputBindings {
+    ChartInputBindings {
+        scroll_zoom: false,
+        ..ChartInputBindings::default()
+    }
 }
 
 fn header() -> Div {
@@ -479,4 +495,14 @@ fn polar_series() -> Vec<Vec<f32>> {
 
 fn wave(x: f32, freq: f32, amp: f32) -> f32 {
     (x * freq).sin() * amp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_gallery_allows_vertical_wheel_scroll() {
+        assert!(!page_chart_bindings().scroll_zoom);
+    }
 }

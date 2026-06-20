@@ -5,6 +5,8 @@ use blinc_charts::prelude::*;
 use blinc_core::{Color, Point, State};
 use blinc_layout::prelude::*;
 
+const PAGE_SCROLL_ZOOM_FACTOR: f32 = 0.0;
+
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ChartFamily {
     #[default]
@@ -796,7 +798,7 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
             chart_surface(linked_line_chart_with_bindings(
                 LineChartHandle::new(line),
                 link,
-                zoom_chart_bindings(),
+                page_chart_bindings(),
             ))
         }
         ChartFamily::LinkedArea => {
@@ -808,7 +810,7 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
             chart_surface(linked_area_chart_with_bindings(
                 AreaChartHandle::new(area),
                 link,
-                zoom_chart_bindings(),
+                page_chart_bindings(),
             ))
         }
         ChartFamily::LinkedBar => {
@@ -820,7 +822,7 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
             chart_surface(linked_bar_chart_with_bindings(
                 BarChartHandle::new(bar),
                 link,
-                zoom_chart_bindings(),
+                page_chart_bindings(),
             ))
         }
         ChartFamily::MultiLine => {
@@ -828,7 +830,7 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
             model.set_gap_dx(9.0);
             chart_surface(multi_line_chart_with_bindings(
                 MultiLineChartHandle::new(model),
-                zoom_chart_bindings(),
+                page_chart_bindings(),
             ))
         }
         ChartFamily::StackedArea => {
@@ -836,7 +838,7 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
             model.style.mode = StackedAreaMode::Streamgraph;
             chart_surface(stacked_area_chart_with_bindings(
                 StackedAreaChartHandle::new(model),
-                zoom_chart_bindings(),
+                page_chart_bindings(),
             ))
         }
         ChartFamily::Scatter => {
@@ -844,18 +846,18 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
             model.set_max_points(1_200);
             chart_surface(scatter_chart_with_bindings(
                 ScatterChartHandle::new(model),
-                zoom_chart_bindings(),
+                page_chart_bindings(),
             ))
         }
         ChartFamily::Candlestick => chart_surface(candlestick_chart_with_bindings(
             CandlestickChartHandle::new(CandlestickChartModel::new(candle_series()?)),
-            zoom_chart_bindings(),
+            page_chart_bindings(),
         )),
         ChartFamily::Histogram => chart_surface(histogram_chart_with_bindings(
             HistogramChartHandle::new(
                 HistogramChartModel::new(histogram_values()).context("histogram chart")?,
             ),
-            zoom_chart_bindings(),
+            page_chart_bindings(),
         )),
         ChartFamily::Statistics => {
             let mut model =
@@ -863,7 +865,7 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
             model.style.mode = StatisticsMode::Violin;
             chart_surface(statistics_chart_with_bindings(
                 StatisticsChartHandle::new(model),
-                zoom_chart_bindings(),
+                page_chart_bindings(),
             ))
         }
         ChartFamily::Heatmap => chart_surface(heatmap_chart(HeatmapChartHandle::new(
@@ -874,13 +876,13 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
             let mut model = ContourChartModel::new(SURFACE_W, SURFACE_H, surface_values())
                 .context("contour chart")?;
             model.style.levels = vec![-18.0, -6.0, 6.0, 18.0, 30.0];
-            model.style.scroll_zoom_factor = 0.02;
+            model.style.scroll_zoom_factor = PAGE_SCROLL_ZOOM_FACTOR;
             chart_surface(contour_chart(ContourChartHandle::new(model)))
         }
         ChartFamily::DensityMap => {
             let mut model =
                 DensityMapChartModel::new(density_points()).context("density map chart")?;
-            model.style.scroll_zoom_factor = 0.02;
+            model.style.scroll_zoom_factor = PAGE_SCROLL_ZOOM_FACTOR;
             chart_surface(density_map_chart(DensityMapChartHandle::new(model)))
         }
         ChartFamily::Gauge => chart_surface(gauge_chart(GaugeChartHandle::new(
@@ -897,7 +899,7 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
         }
         ChartFamily::Geo => {
             let mut model = GeoChartModel::new(geo_shapes()).context("geo chart")?;
-            model.style.scroll_zoom_factor = 0.02;
+            model.style.scroll_zoom_factor = PAGE_SCROLL_ZOOM_FACTOR;
             chart_surface(geo_chart(GeoChartHandle::new(model)))
         }
         ChartFamily::Hierarchy => {
@@ -909,7 +911,7 @@ fn build_chart(family: ChartFamily) -> anyhow::Result<Div> {
         ChartFamily::Network => {
             let mut model = NetworkChartModel::new_sankey(network_nodes(), network_links())
                 .context("network chart")?;
-            model.style.scroll_zoom_factor = 0.02;
+            model.style.scroll_zoom_factor = PAGE_SCROLL_ZOOM_FACTOR;
             chart_surface(network_chart(NetworkChartHandle::new(model)))
         }
     })
@@ -2471,4 +2473,20 @@ fn network_links() -> Vec<(usize, usize, f32)> {
 
 fn wave(x: f32, freq: f32, amp: f32) -> f32 {
     (x * freq).sin() * amp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_preview_allows_vertical_wheel_scroll() {
+        assert!(!page_chart_bindings().scroll_zoom);
+        assert_eq!(PAGE_SCROLL_ZOOM_FACTOR, 0.0);
+    }
+
+    #[test]
+    fn explicit_zoom_demo_keeps_chart_local_wheel_zoom() {
+        assert!(zoom_chart_bindings().scroll_zoom);
+    }
 }
