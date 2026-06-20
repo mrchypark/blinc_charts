@@ -371,7 +371,7 @@ pub fn coverage_matrix() -> Vec<CoverageCase> {
 
 pub fn build_interaction_examples_ui(family: ChartFamily) -> anyhow::Result<Div> {
     let example = example(family).expect("default gallery example exists");
-    example_tab(example, build_chart(family)?, 624.0)
+    example_tab(example, build_chart(family)?, 624.0, None)
 }
 
 pub fn validate_sample_models() -> anyhow::Result<GalleryValidationReport> {
@@ -399,12 +399,14 @@ pub fn desktop_window_config() -> WindowConfig {
 pub fn build_native_ui(ctx: &mut WindowedContext) -> Div {
     let selected = ctx.use_state_keyed("gallery.selected_chart", ChartFamily::default);
     let active_tab = ctx.use_state_keyed("gallery.active_tab", GalleryTab::default);
+    let open_code = ctx.use_state_keyed("gallery.open_code_panel", String::new);
 
     build_desktop_ui_with_state(
         ctx.width,
         ctx.height,
         Some(selected),
         Some(active_tab),
+        Some(open_code),
         "blinc_charts desktop gallery",
         "Native Blinc window backed by chart models, handles, variants, and code notes.",
     )
@@ -417,6 +419,7 @@ pub fn build_desktop_ui(width: f32, height: f32) -> anyhow::Result<Div> {
         height,
         None,
         None,
+        None,
         "blinc_charts desktop gallery",
         "Native Blinc window backed by chart models, handles, variants, and code notes.",
     )
@@ -427,6 +430,7 @@ fn build_desktop_ui_with_state(
     height: f32,
     selected_state: Option<State<ChartFamily>>,
     tab_state: Option<State<GalleryTab>>,
+    open_code_state: Option<State<String>>,
     title: &'static str,
     subtitle: &'static str,
 ) -> anyhow::Result<Div> {
@@ -455,6 +459,7 @@ fn build_desktop_ui_with_state(
             example,
             active_tab,
             tab_state,
+            open_code_state,
             subtitle,
             build_chart(selected)?,
             height,
@@ -572,6 +577,7 @@ fn detail_pane(
     example: &GalleryExample,
     active_tab: GalleryTab,
     tab_state: Option<State<GalleryTab>>,
+    open_code_state: Option<State<String>>,
     subtitle: &'static str,
     chart: Div,
     height: f32,
@@ -583,7 +589,7 @@ fn detail_pane(
     let content_height = (height - 236.0).max(320.0);
     let content = match active_tab {
         GalleryTab::Example | GalleryTab::Interactions => {
-            example_tab(example, chart, content_height)?
+            example_tab(example, chart, content_height, open_code_state)?
         }
         GalleryTab::Code => code_tab(example.family, content_height),
         GalleryTab::Variants => variants_tab(example.family, content_height),
@@ -679,32 +685,55 @@ fn tab_bar(active_tab: GalleryTab, tab_state: Option<State<GalleryTab>>) -> Div 
     row
 }
 
-fn example_tab(example: &GalleryExample, chart: Div, content_height: f32) -> anyhow::Result<Div> {
+fn example_tab(
+    example: &GalleryExample,
+    chart: Div,
+    content_height: f32,
+    open_code_state: Option<State<String>>,
+) -> anyhow::Result<Div> {
     let panel = div()
         .w_full()
         .h_fit()
         .flex_col()
         .gap_px(12.0)
         .p_px(2.0)
-        .child(
-            div()
-                .w_full()
-                .h(380.0)
-                .rounded(8.0)
-                .border(1.0, Color::rgba(1.0, 1.0, 1.0, 0.10))
-                .bg(Color::rgba(0.075, 0.083, 0.100, 1.0))
-                .p_px(10.0)
-                .child(chart),
-        )
+        .child(main_example_card(
+            example.family,
+            chart,
+            open_code_state.clone(),
+        ))
         .child(info_grid(&[
             ("Data shape", data_shape(example.family)),
             ("What to try", interaction_hint(example.family)),
             ("Budget note", budget_note(example.family)),
         ]))
         .child(section_heading("Runnable interaction examples"))
-        .child(interaction_examples_panel(example.family)?);
+        .child(interaction_examples_panel(example.family, open_code_state)?);
 
     Ok(scroll_tab(content_height, panel))
+}
+
+fn main_example_card(
+    family: ChartFamily,
+    chart: Div,
+    open_code_state: Option<State<String>>,
+) -> Div {
+    div()
+        .w_full()
+        .h_fit()
+        .rounded(8.0)
+        .border(1.0, Color::rgba(1.0, 1.0, 1.0, 0.10))
+        .bg(Color::rgba(0.075, 0.083, 0.100, 1.0))
+        .p_px(10.0)
+        .flex_col()
+        .gap_px(10.0)
+        .child(div().w_full().h(380.0).child(chart))
+        .child(collapsible_code_panel(
+            "main-example",
+            "Example code",
+            code_snippet(family),
+            open_code_state,
+        ))
 }
 
 fn scroll_tab(content_height: f32, content: Div) -> Div {
@@ -759,7 +788,10 @@ fn variants_tab(family: ChartFamily, content_height: f32) -> Div {
     scroll_tab(content_height, panel)
 }
 
-fn interaction_examples_panel(family: ChartFamily) -> anyhow::Result<Div> {
+fn interaction_examples_panel(
+    family: ChartFamily,
+    open_code_state: Option<State<String>>,
+) -> anyhow::Result<Div> {
     let mut panel = div().w_full().h_fit().flex_col().gap_px(14.0).p_px(2.0);
 
     for entry in interaction_demo_entries(family) {
@@ -767,6 +799,7 @@ fn interaction_examples_panel(family: ChartFamily) -> anyhow::Result<Div> {
             entry.spec,
             interaction_demo_chart(family, entry.kind)
                 .with_context(|| format!("{} interaction demo", entry.spec.title))?,
+            open_code_state.clone(),
         ));
     }
 
@@ -939,7 +972,11 @@ fn framed_chart(chart: impl ElementBuilder + 'static) -> Div {
         .child(chart)
 }
 
-fn interaction_demo_card(spec: InteractionDemo, chart: Div) -> Div {
+fn interaction_demo_card(
+    spec: InteractionDemo,
+    chart: Div,
+    open_code_state: Option<State<String>>,
+) -> Div {
     div()
         .w_full()
         .h_fit()
@@ -967,23 +1004,85 @@ fn interaction_demo_card(spec: InteractionDemo, chart: Div) -> Div {
                 ),
         )
         .child(framed_chart(chart))
+        .child(collapsible_code_panel(
+            spec.title,
+            "Code",
+            spec.code_change,
+            open_code_state,
+        ))
         .child(
-            div()
-                .w_full()
-                .h_fit()
-                .flex_col()
-                .gap_px(5.0)
-                .child(
-                    text(spec.code_change)
-                        .size(12.0)
-                        .color(Color::rgba(0.95, 0.67, 0.33, 1.0)),
-                )
-                .child(
-                    text(spec.effect)
-                        .size(12.0)
-                        .color(Color::rgba(0.74, 0.79, 0.85, 1.0)),
-                ),
+            text(spec.effect)
+                .size(12.0)
+                .color(Color::rgba(0.74, 0.79, 0.85, 1.0)),
         )
+}
+
+fn collapsible_code_panel(
+    panel_id: &'static str,
+    label: &'static str,
+    snippet: &'static str,
+    open_code_state: Option<State<String>>,
+) -> Div {
+    let is_open = open_code_state
+        .as_ref()
+        .map(|state| state.get() == panel_id)
+        .unwrap_or(false);
+    let mut panel = div().w_full().h_fit().flex_col().gap_px(8.0).child(
+        code_toggle_row(panel_id, label, is_open, open_code_state.clone()),
+    );
+
+    if is_open {
+        panel = panel.child(
+            code(snippet)
+                .line_numbers(false)
+                .font_size(12.0)
+                .code_bg(Color::rgba(0.035, 0.040, 0.048, 1.0))
+                .rounded(8.0),
+        );
+    }
+
+    panel
+}
+
+fn code_toggle_row(
+    panel_id: &'static str,
+    label: &'static str,
+    is_open: bool,
+    open_code_state: Option<State<String>>,
+) -> Div {
+    let mut row = div()
+        .w_full()
+        .h(30.0)
+        .rounded(7.0)
+        .border(1.0, Color::rgba(1.0, 1.0, 1.0, 0.08))
+        .bg(Color::rgba(0.055, 0.062, 0.076, 1.0))
+        .items_center()
+        .justify_between()
+        .p_px(8.0)
+        .cursor_pointer()
+        .child(
+            text(label)
+                .size(12.0)
+                .color(Color::rgba(0.84, 0.88, 0.94, 1.0)),
+        )
+        .child(
+            text(if is_open { "Hide" } else { "Show" })
+                .size(12.0)
+                .color(Color::rgba(0.95, 0.67, 0.33, 1.0)),
+        );
+
+    if let Some(state) = open_code_state {
+        row = row.on_click(move |_| {
+            let next = if is_open {
+                String::new()
+            } else {
+                panel_id.to_string()
+            };
+            state.set_rebuild(next);
+        });
+    }
+
+    row
 }
 
 fn interaction_demo_entries(family: ChartFamily) -> Vec<InteractionDemoEntry> {
