@@ -42,7 +42,7 @@ pub fn sample_inventory() -> Vec<ChartSample> {
             summary: "Shared X-domain line chart with hover, pan, zoom, and brush.",
             interactions: &[
                 "hover X",
-                "wheel/pinch zoom",
+                "pinch zoom",
                 "drag pan",
                 "Shift+drag brush",
             ],
@@ -54,7 +54,7 @@ pub fn sample_inventory() -> Vec<ChartSample> {
             summary: "Filled linked series using the same interaction state.",
             interactions: &[
                 "hover X",
-                "wheel/pinch zoom",
+                "pinch zoom",
                 "drag pan",
                 "Shift+drag brush",
             ],
@@ -66,7 +66,7 @@ pub fn sample_inventory() -> Vec<ChartSample> {
             summary: "Grouped bars synchronized through a shared chart link.",
             interactions: &[
                 "hover X",
-                "wheel/pinch zoom",
+                "pinch zoom",
                 "drag pan",
                 "Shift+drag brush",
             ],
@@ -85,7 +85,7 @@ pub fn sample_inventory() -> Vec<ChartSample> {
             summary: "OHLC candles with X-domain navigation and hover.",
             interactions: &[
                 "hover candle",
-                "wheel/pinch zoom",
+                "pinch zoom",
                 "drag pan",
                 "Shift+drag brush",
             ],
@@ -97,7 +97,7 @@ pub fn sample_inventory() -> Vec<ChartSample> {
             summary: "Distribution bins with the shared X interaction model.",
             interactions: &[
                 "hover bin",
-                "wheel/pinch zoom",
+                "pinch zoom",
                 "drag pan",
                 "Shift+drag brush",
             ],
@@ -109,7 +109,7 @@ pub fn sample_inventory() -> Vec<ChartSample> {
             summary: "Grouped distribution summary with hover and X navigation.",
             interactions: &[
                 "hover group",
-                "wheel/pinch zoom",
+                "pinch zoom",
                 "drag pan",
                 "Shift+drag brush",
             ],
@@ -347,10 +347,10 @@ fn chart_card(
 fn interaction_hint(family: ChartFamily) -> &'static str {
     match family {
         ChartFamily::LinkedLine | ChartFamily::LinkedArea | ChartFamily::LinkedBar => {
-            "Linked: wheel/pinch zoom X, drag pan, Shift+drag brush, shared hover X."
+            "Linked: pinch zoom X, drag pan, Shift+drag brush, shared hover X."
         }
         ChartFamily::Candlestick | ChartFamily::Histogram | ChartFamily::Statistics => {
-            "Interactive: wheel/pinch zoom X, drag pan, Shift+drag brush, hover nearest value."
+            "Interactive: pinch zoom X, drag pan, Shift+drag brush, hover nearest value."
         }
         ChartFamily::Polar => {
             "Hover dimensions to inspect the active axis; modes change interpretation."

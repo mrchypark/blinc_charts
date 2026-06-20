@@ -189,7 +189,7 @@ fn interaction_gallery_exposes_runnable_examples() {
     assert!(
         contour
             .iter()
-            .any(|demo| demo.title == "2D pan + wheel/pinch zoom + rectangle brush"),
+            .any(|demo| demo.title == "2D pan + pinch zoom + rectangle brush"),
         "contour should expose 2D surface navigation"
     );
     assert!(
@@ -222,11 +222,11 @@ fn interaction_gallery_exposes_runnable_examples() {
 
     let pan_zoom = linked_line
         .iter()
-        .find(|demo| demo.title == "Hover + pan + wheel/pinch zoom")
+        .find(|demo| demo.title == "Hover + pan + pinch zoom")
         .expect("linked line should include a pan/zoom example");
     assert!(
-        pan_zoom.code_change.contains("scroll_zoom = true"),
-        "pan/zoom example should enable chart-local wheel zoom"
+        pan_zoom.code_change.contains("scroll_zoom = false"),
+        "pan/zoom example should leave wheel gestures for page scrolling"
     );
 
     for keyword in [

@@ -140,7 +140,7 @@ const EXAMPLES: &[GalleryExample] = &[
         summary: "Time-series line chart with hover, LOD, X zoom, pan, brush, and linked domains.",
         points: SERIES_POINTS,
         api: &["LineChartModel", "LineChartHandle", "linked_line_chart", "chart_link"],
-        interactions: &["hover nearest point", "wheel/pinch X zoom", "drag pan", "Shift+drag brush"],
+        interactions: &["hover nearest point", "pinch X zoom", "drag pan", "Shift+drag brush"],
     },
     GalleryExample {
         family: ChartFamily::LinkedArea,
@@ -149,7 +149,7 @@ const EXAMPLES: &[GalleryExample] = &[
         summary: "Filled time-series chart that shares the same X-domain interaction model as line.",
         points: SERIES_POINTS,
         api: &["AreaChartModel", "AreaChartStyle", "linked_area_chart"],
-        interactions: &["hover point", "wheel/pinch X zoom", "drag pan", "Shift+drag brush"],
+        interactions: &["hover point", "pinch X zoom", "drag pan", "Shift+drag brush"],
     },
     GalleryExample {
         family: ChartFamily::LinkedBar,
@@ -158,7 +158,7 @@ const EXAMPLES: &[GalleryExample] = &[
         summary: "Grouped or stacked bars over a continuous X-domain, including negative-domain handling.",
         points: SERIES_POINTS * 2,
         api: &["BarChartModel", "BarChartStyle", "linked_bar_chart"],
-        interactions: &["hover X", "wheel/pinch X zoom", "drag pan", "Shift+drag brush"],
+        interactions: &["hover X", "pinch X zoom", "drag pan", "Shift+drag brush"],
     },
     GalleryExample {
         family: ChartFamily::MultiLine,
@@ -167,7 +167,7 @@ const EXAMPLES: &[GalleryExample] = &[
         summary: "Many related series with gap splitting, per-series LOD, and density fallback under budgets.",
         points: SERIES_POINTS * 5,
         api: &["MultiLineChartModel", "MultiLineChartStyle", "multi_line_chart"],
-        interactions: &["hover X", "wheel/pinch X zoom", "drag pan", "Shift+drag brush"],
+        interactions: &["hover X", "pinch X zoom", "drag pan", "Shift+drag brush"],
     },
     GalleryExample {
         family: ChartFamily::StackedArea,
@@ -176,7 +176,7 @@ const EXAMPLES: &[GalleryExample] = &[
         summary: "Layered area bands for part-to-whole time series, with stacked and streamgraph modes.",
         points: SERIES_POINTS * 4,
         api: &["StackedAreaChartModel", "StackedAreaMode", "stacked_area_chart"],
-        interactions: &["hover X", "wheel/pinch X zoom", "drag pan", "Shift+drag brush"],
+        interactions: &["hover X", "pinch X zoom", "drag pan", "Shift+drag brush"],
     },
     GalleryExample {
         family: ChartFamily::Scatter,
@@ -185,7 +185,7 @@ const EXAMPLES: &[GalleryExample] = &[
         summary: "Point cloud over an X/Y domain with spatial-index hover and draw-budget controls.",
         points: SERIES_POINTS * 2,
         api: &["ScatterChartModel", "ScatterChartStyle", "scatter_chart"],
-        interactions: &["hover nearest point", "wheel/pinch X zoom", "drag pan", "Shift+drag brush"],
+        interactions: &["hover nearest point", "pinch X zoom", "drag pan", "Shift+drag brush"],
     },
     GalleryExample {
         family: ChartFamily::Candlestick,
@@ -194,7 +194,7 @@ const EXAMPLES: &[GalleryExample] = &[
         summary: "OHLC finance chart with visible-domain candle binning and up/down styling.",
         points: CANDLE_POINTS,
         api: &["Candle", "CandleSeries", "CandlestickChartModel"],
-        interactions: &["hover X", "wheel/pinch X zoom", "drag pan", "Shift+drag brush"],
+        interactions: &["hover X", "pinch X zoom", "drag pan", "Shift+drag brush"],
     },
     GalleryExample {
         family: ChartFamily::Histogram,
@@ -203,7 +203,7 @@ const EXAMPLES: &[GalleryExample] = &[
         summary: "Distribution bins with dynamic visible X-domain and configurable bin counts.",
         points: HISTOGRAM_POINTS,
         api: &["HistogramChartModel", "HistogramChartStyle", "histogram_chart"],
-        interactions: &["hover bin", "wheel/pinch X zoom", "drag pan", "Shift+drag brush"],
+        interactions: &["hover bin", "pinch X zoom", "drag pan", "Shift+drag brush"],
     },
     GalleryExample {
         family: ChartFamily::Statistics,
@@ -212,7 +212,7 @@ const EXAMPLES: &[GalleryExample] = &[
         summary: "Grouped statistical summaries rendered as boxplot, violin, or error-band views.",
         points: STATS_GROUPS * STATS_POINTS_PER_GROUP,
         api: &["StatisticsChartModel", "StatisticsMode", "statistics_chart"],
-        interactions: &["hover group", "wheel/pinch X zoom", "drag pan", "Shift+drag brush"],
+        interactions: &["hover group", "pinch X zoom", "drag pan", "Shift+drag brush"],
     },
     GalleryExample {
         family: ChartFamily::Heatmap,
@@ -928,13 +928,6 @@ fn page_chart_bindings() -> ChartInputBindings {
     }
 }
 
-fn zoom_chart_bindings() -> ChartInputBindings {
-    ChartInputBindings {
-        scroll_zoom: true,
-        ..ChartInputBindings::default()
-    }
-}
-
 fn framed_chart(chart: impl ElementBuilder + 'static) -> Div {
     div()
         .w_full()
@@ -998,10 +991,10 @@ fn interaction_demo_entries(family: ChartFamily) -> Vec<InteractionDemoEntry> {
         let mut demos = vec![
             demo_entry(
                 InteractionDemoKind::XPanAndHover,
-                "Hover + pan + wheel/pinch zoom",
-                "Move the pointer over this chart for hover state, drag horizontally to pan X, and wheel or pinch over the chart to zoom X.",
-                x_zoom_code(family),
-                "This card enables ChartInputBindings::scroll_zoom so zoom gestures are routed to the selected chart while the surrounding page still scrolls outside the chart.",
+                "Hover + pan + pinch zoom",
+                "Move the pointer over this chart for hover state, drag horizontally to pan X, and pinch over the chart to zoom X. Vertical wheel keeps scrolling this page.",
+                x_interaction_code(family),
+                "The gallery keeps ChartInputBindings::scroll_zoom disabled so wheel gestures that start inside the chart still move the content page.",
             ),
             demo_entry(
                 InteractionDemoKind::XShiftBrush,
@@ -1023,7 +1016,7 @@ fn interaction_demo_entries(family: ChartFamily) -> Vec<InteractionDemoEntry> {
             demos.push(demo_entry(
                 InteractionDemoKind::XLinkedSync,
                 "Linked domain sync",
-                "Drag, wheel/pinch, hover, or Shift+drag either chart row; both rows use the selected family and share one ChartLinkHandle.",
+                "Drag, pinch, hover, or Shift+drag either chart row; both rows use the selected family and share one ChartLinkHandle.",
                 linked_code(family),
                 "The linked builder for this family synchronizes x-domain, hover x, and brush selection across multiple chart instances.",
             ));
@@ -1034,16 +1027,16 @@ fn interaction_demo_entries(family: ChartFamily) -> Vec<InteractionDemoEntry> {
     match family {
         ChartFamily::Contour | ChartFamily::DensityMap => vec![demo_entry(
             InteractionDemoKind::TwoDimensional,
-            "2D pan + wheel/pinch zoom + rectangle brush",
-            "Drag to pan both axes, wheel or pinch over the chart to zoom, and Shift+drag to create a rectangular selection in data coordinates.",
-            "model.style.scroll_zoom_factor = 0.02; contour_chart(handle) / density_map_chart(handle)",
-            "The selected surface chart uses 2D data-space transforms and intentionally enables chart-local zoom for this runnable demo.",
+            "2D pan + pinch zoom + rectangle brush",
+            "Drag to pan both axes, pinch over the chart to zoom, and Shift+drag to create a rectangular selection in data coordinates. Vertical wheel keeps scrolling this page.",
+            "model.style.scroll_zoom_factor = 0.0; contour_chart(handle) / density_map_chart(handle)",
+            "The selected surface chart uses 2D data-space transforms while leaving wheel scrolling to the surrounding gallery.",
         )],
         ChartFamily::Geo | ChartFamily::Network => vec![demo_entry(
             InteractionDemoKind::TwoDimensional,
             "2D navigation + hover inspection",
-            "Drag to pan the projected space, wheel or pinch over the chart to zoom, and move the pointer to inspect the active coordinate or node.",
-            "model.style.scroll_zoom_factor = 0.02; geo_chart(handle) / network_chart(handle)",
+            "Drag to pan the projected space, pinch over the chart to zoom, and move the pointer to inspect the active coordinate or node. Vertical wheel keeps scrolling this page.",
+            "model.style.scroll_zoom_factor = 0.0; geo_chart(handle) / network_chart(handle)",
             "This selected chart family has graph/projection navigation, but not X-range brush semantics.",
         )],
         ChartFamily::Polar | ChartFamily::Hierarchy => vec![demo_entry(
@@ -1116,36 +1109,36 @@ fn supports_linked_sync(family: ChartFamily) -> bool {
     )
 }
 
-fn x_zoom_code(family: ChartFamily) -> &'static str {
+fn x_interaction_code(family: ChartFamily) -> &'static str {
     match family {
         ChartFamily::LinkedLine => {
-            "bindings.scroll_zoom = true; line_chart_with_bindings(LineChartHandle::new(model), bindings)"
+            "bindings.scroll_zoom = false; line_chart_with_bindings(LineChartHandle::new(model), bindings)"
         }
         ChartFamily::LinkedArea => {
-            "bindings.scroll_zoom = true; area_chart_with_bindings(AreaChartHandle::new(model), bindings)"
+            "bindings.scroll_zoom = false; area_chart_with_bindings(AreaChartHandle::new(model), bindings)"
         }
         ChartFamily::LinkedBar => {
-            "bindings.scroll_zoom = true; bar_chart_with_bindings(BarChartHandle::new(model), bindings)"
+            "bindings.scroll_zoom = false; bar_chart_with_bindings(BarChartHandle::new(model), bindings)"
         }
         ChartFamily::MultiLine => {
-            "bindings.scroll_zoom = true; multi_line_chart_with_bindings(MultiLineChartHandle::new(model), bindings)"
+            "bindings.scroll_zoom = false; multi_line_chart_with_bindings(MultiLineChartHandle::new(model), bindings)"
         }
         ChartFamily::StackedArea => {
-            "bindings.scroll_zoom = true; stacked_area_chart_with_bindings(StackedAreaChartHandle::new(model), bindings)"
+            "bindings.scroll_zoom = false; stacked_area_chart_with_bindings(StackedAreaChartHandle::new(model), bindings)"
         }
         ChartFamily::Scatter => {
-            "bindings.scroll_zoom = true; scatter_chart_with_bindings(ScatterChartHandle::new(model), bindings)"
+            "bindings.scroll_zoom = false; scatter_chart_with_bindings(ScatterChartHandle::new(model), bindings)"
         }
         ChartFamily::Candlestick => {
-            "bindings.scroll_zoom = true; candlestick_chart_with_bindings(CandlestickChartHandle::new(model), bindings)"
+            "bindings.scroll_zoom = false; candlestick_chart_with_bindings(CandlestickChartHandle::new(model), bindings)"
         }
         ChartFamily::Histogram => {
-            "bindings.scroll_zoom = true; histogram_chart_with_bindings(HistogramChartHandle::new(model), bindings)"
+            "bindings.scroll_zoom = false; histogram_chart_with_bindings(HistogramChartHandle::new(model), bindings)"
         }
         ChartFamily::Statistics => {
-            "bindings.scroll_zoom = true; statistics_chart_with_bindings(StatisticsChartHandle::new(model), bindings)"
+            "bindings.scroll_zoom = false; statistics_chart_with_bindings(StatisticsChartHandle::new(model), bindings)"
         }
-        _ => "bindings.scroll_zoom = true; chart_with_bindings(handle, bindings)",
+        _ => "bindings.scroll_zoom = false; chart_with_bindings(handle, bindings)",
     }
 }
 
@@ -1194,11 +1187,7 @@ fn static_code(family: ChartFamily) -> &'static str {
 fn interaction_demo_chart(family: ChartFamily, kind: InteractionDemoKind) -> anyhow::Result<Div> {
     match kind {
         InteractionDemoKind::XPanAndHover | InteractionDemoKind::XShiftBrush => {
-            let bindings = if matches!(kind, InteractionDemoKind::XPanAndHover) {
-                zoom_chart_bindings()
-            } else {
-                page_chart_bindings()
-            };
+            let bindings = page_chart_bindings();
             x_family_chart(family, bindings)
         }
         InteractionDemoKind::XDragBrush => x_family_chart(family, drag_only_brush_bindings()),
@@ -1302,7 +1291,7 @@ fn x_family_chart(family: ChartFamily, bindings: ChartInputBindings) -> anyhow::
 
 fn linked_family_chart(family: ChartFamily) -> anyhow::Result<Div> {
     let link = chart_link(0.0, (SERIES_POINTS - 1) as f32);
-    let bindings = zoom_chart_bindings();
+    let bindings = page_chart_bindings();
     let mut panel = div().w_full().h_full().flex_col().gap_px(8.0);
 
     match family {
@@ -1408,25 +1397,25 @@ fn two_dimensional_family_chart(family: ChartFamily) -> anyhow::Result<Div> {
             let mut model = ContourChartModel::new(SURFACE_W, SURFACE_H, surface_values())
                 .context("contour demo")?;
             model.style.levels = vec![-18.0, -6.0, 6.0, 18.0, 30.0];
-            model.style.scroll_zoom_factor = 0.02;
+            model.style.scroll_zoom_factor = PAGE_SCROLL_ZOOM_FACTOR;
             Ok(chart_surface(contour_chart(ContourChartHandle::new(model))))
         }
         ChartFamily::DensityMap => {
             let mut model = DensityMapChartModel::new(density_points()).context("density demo")?;
-            model.style.scroll_zoom_factor = 0.02;
+            model.style.scroll_zoom_factor = PAGE_SCROLL_ZOOM_FACTOR;
             Ok(chart_surface(density_map_chart(
                 DensityMapChartHandle::new(model),
             )))
         }
         ChartFamily::Geo => {
             let mut model = GeoChartModel::new(geo_shapes()).context("geo demo")?;
-            model.style.scroll_zoom_factor = 0.02;
+            model.style.scroll_zoom_factor = PAGE_SCROLL_ZOOM_FACTOR;
             Ok(chart_surface(geo_chart(GeoChartHandle::new(model))))
         }
         ChartFamily::Network => {
             let mut model = NetworkChartModel::new_sankey(network_nodes(), network_links())
                 .context("network demo")?;
-            model.style.scroll_zoom_factor = 0.02;
+            model.style.scroll_zoom_factor = PAGE_SCROLL_ZOOM_FACTOR;
             Ok(chart_surface(network_chart(NetworkChartHandle::new(model))))
         }
         _ => build_chart(family),
@@ -1681,7 +1670,7 @@ fn interaction_hint(family: ChartFamily) -> &'static str {
         | ChartFamily::DensityMap
         | ChartFamily::Geo
         | ChartFamily::Network => {
-            "Use the wheel to zoom, drag to pan, and hover to inspect the current 2D position."
+            "Use pinch to zoom, drag to pan, and hover to inspect the current 2D position."
         }
         ChartFamily::Gauge | ChartFamily::Funnel | ChartFamily::Heatmap => {
             "Inspect the static output and compare the variant notes for style and budget changes."
@@ -1689,7 +1678,7 @@ fn interaction_hint(family: ChartFamily) -> &'static str {
         ChartFamily::Hierarchy | ChartFamily::Polar => {
             "Hover regions or dimensions; variants change the layout interpretation."
         }
-        _ => "Use the wheel to zoom X, drag to pan, and Shift+drag to create a brush selection.",
+        _ => "Use pinch to zoom X, drag to pan, and Shift+drag to create a brush selection.",
     }
 }
 
@@ -1977,8 +1966,8 @@ fn variant_notes(family: ChartFamily) -> &'static [(&'static str, &'static str, 
         ChartFamily::Geo => &[
             (
                 "Interaction speed",
-                "model.style.scroll_zoom_factor = 0.02",
-                "Controls how aggressively wheel deltas zoom the projected space.",
+                "model.style.scroll_zoom_factor = 0.0",
+                "Leaves wheel deltas for page scroll in this gallery.",
             ),
             (
                 "Pinch floor",
@@ -2007,7 +1996,7 @@ fn variant_notes(family: ChartFamily) -> &'static [(&'static str, &'static str, 
             (
                 "Interaction speed",
                 "style.scroll_zoom_factor = 0.01..0.04",
-                "Controls how aggressively wheel deltas zoom the chart domain.",
+                "Controls how aggressively opt-in wheel deltas zoom the chart domain.",
             ),
             (
                 "Pinch floor",
@@ -2039,7 +2028,7 @@ fn interaction_notes(family: ChartFamily) -> &'static [(&'static str, &'static s
             (
                 "Disable drag pan",
                 "bindings.pan_drag = DragBinding::none()",
-                "Plain drag stops moving X; wheel, pinch, hover, and brush remain active.",
+                "Plain drag stops moving X; pinch, hover, and brush remain active.",
             ),
         ],
         ChartFamily::MultiLine
@@ -2051,7 +2040,7 @@ fn interaction_notes(family: ChartFamily) -> &'static [(&'static str, &'static s
             (
                 "Default gestures",
                 "*_chart_with_bindings(handle, ChartInputBindings::default())",
-                "Wheel and pinch zoom X; plain drag pans; Shift+drag creates a brush selection.",
+                "Pinch zooms X; plain drag pans; Shift+drag creates a brush selection.",
             ),
             (
                 "Brush-only drag",
@@ -2067,8 +2056,8 @@ fn interaction_notes(family: ChartFamily) -> &'static [(&'static str, &'static s
         ChartFamily::Contour | ChartFamily::DensityMap => &[
             (
                 "2D zoom speed",
-                "model.style.scroll_zoom_factor = 0.01..0.04",
-                "Changes how quickly both X and Y domains zoom around the cursor.",
+                "model.style.scroll_zoom_factor = 0.0 in this gallery",
+                "Disables wheel capture while pinch still zooms around the cursor.",
             ),
             (
                 "2D rectangle brush",
@@ -2089,8 +2078,8 @@ fn interaction_notes(family: ChartFamily) -> &'static [(&'static str, &'static s
             ),
             (
                 "Cursor zoom",
-                "model.style.scroll_zoom_factor = 0.01..0.04",
-                "Zooms around the pointer, preserving the inspected location under the cursor.",
+                "model.style.scroll_zoom_factor = 0.0 in this gallery",
+                "Leaves wheel for page scroll while pinch preserves the inspected location under the cursor.",
             ),
             (
                 "Hover budget",
@@ -2139,7 +2128,7 @@ fn explanation_notes(family: ChartFamily) -> &'static [(&'static str, &'static [
     match family {
         ChartFamily::LinkedLine | ChartFamily::LinkedArea | ChartFamily::LinkedBar => &[
             ("Linking", &["The linked builders share ChartLinkHandle state.", "X-domain, hover X, and brush selection can be synchronized across charts."]),
-            ("Input model", &["Wheel and pinch zoom around the cursor position.", "Plain drag pans; Shift+drag creates a brush range."]),
+            ("Input model", &["Pinch zooms around the cursor position.", "Plain drag pans; Shift+drag creates a brush range."]),
             ("Data safety", &["Domains reject non-finite or inverted ranges.", "Selection endpoints are sorted and non-finite values are dropped."]),
         ],
         ChartFamily::MultiLine => &[
@@ -2486,7 +2475,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_zoom_demo_keeps_chart_local_wheel_zoom() {
-        assert!(zoom_chart_bindings().scroll_zoom);
+    fn interaction_demos_allow_vertical_wheel_scroll() {
+        assert!(!page_chart_bindings().scroll_zoom);
     }
 }
