@@ -1764,13 +1764,13 @@ let handle = BarChartHandle::new(model);
 linked_bar_chart(handle, link)"#
         }
         ChartFamily::MultiLine => {
-            r#"let mut model = MultiLineChartModel::new(series)?;
+            r#"let mut model = MultiLineChartModel::new(vec![north, south])?;
 model.set_gap_dx(9.0);
-model.style.max_segments = 12_000;
+model.style.max_points_per_series = 12_000;
 multi_line_chart(MultiLineChartHandle::new(model))"#
         }
         ChartFamily::StackedArea => {
-            r#"let mut model = StackedAreaChartModel::new(series)?;
+            r#"let mut model = StackedAreaChartModel::new(vec![north, south])?;
 model.style.mode = StackedAreaMode::Streamgraph;
 stacked_area_chart(StackedAreaChartHandle::new(model))"#
         }
@@ -1820,7 +1820,8 @@ let model = FunnelChartModel::new(stages)?;
 funnel_chart(FunnelChartHandle::new(model))"#
         }
         ChartFamily::Polar => {
-            r#"let mut model = PolarChartModel::new_radar(dimensions, series)?;
+            r#"let rows = vec![vec![0.8, 0.6, 0.4, 0.3], vec![0.5, 0.9, 0.7, 0.6]];
+let mut model = PolarChartModel::new_radar(dimensions, rows)?;
 model.mode = PolarChartMode::Radar;
 polar_chart(PolarChartHandle::new(model))"#
         }
@@ -1921,30 +1922,42 @@ fn variant_notes(family: ChartFamily) -> &'static [(&'static str, &'static str, 
         ChartFamily::Network => &[
             (
                 "Graph",
-                "NetworkChartModel::new_graph(nodes, edges)",
+                "NetworkChartModel::new_graph(nodes, edges)?",
                 "Shows topology and supports graph pan/zoom.",
             ),
             (
                 "Sankey",
-                "NetworkChartModel::new_sankey(nodes, links)",
+                "NetworkChartModel::new_sankey(nodes, links)?",
                 "Shows weighted flow from sources to sinks.",
             ),
             (
                 "Chord",
-                "NetworkChartModel::new_chord(labels, matrix)",
+                "NetworkChartModel::new_chord(labels, matrix)?",
                 "Shows dense pairwise relationships from an NxN matrix.",
             ),
         ],
-        ChartFamily::Heatmap | ChartFamily::DensityMap | ChartFamily::Contour => &[
+        ChartFamily::Heatmap | ChartFamily::DensityMap => &[
             (
                 "Higher resolution",
-                "style.max_cells_* or style.max_segments += n",
+                "model.style.max_cells_x = 128; model.style.max_cells_y = 96",
                 "Reveals more detail while increasing draw cost.",
             ),
             (
                 "Lower resolution",
-                "style.max_cells_* or style.max_segments -= n",
+                "model.style.max_cells_x = 32; model.style.max_cells_y = 24",
                 "Keeps frame cost predictable for large fields.",
+            ),
+        ],
+        ChartFamily::Contour => &[
+            (
+                "Higher resolution",
+                "model.style.max_segments = 4_000",
+                "Reveals more contour detail while increasing draw cost.",
+            ),
+            (
+                "Lower resolution",
+                "model.style.max_segments = 250",
+                "Keeps contour tessellation cost predictable for large fields.",
             ),
         ],
         ChartFamily::Gauge => &[
@@ -1957,6 +1970,35 @@ fn variant_notes(family: ChartFamily) -> &'static [(&'static str, &'static str, 
                 "Transitioned value",
                 "model.set_value_transition(value, seconds)",
                 "Animates toward the target using deterministic transition state.",
+            ),
+        ],
+        ChartFamily::Geo => &[
+            (
+                "Interaction speed",
+                "model.style.scroll_zoom_factor = 0.02",
+                "Controls how aggressively wheel deltas zoom the projected space.",
+            ),
+            (
+                "Pinch floor",
+                "model.style.pinch_zoom_min = 0.01",
+                "Prevents invalid or too-small zoom factors during pinch gestures.",
+            ),
+            (
+                "Budget cap",
+                "model.style.max_points = 20_000",
+                "Caps projected geometry detail for stable renderer cost.",
+            ),
+        ],
+        ChartFamily::Funnel => &[
+            (
+                "Stage values",
+                "let model = FunnelChartModel::new(stages)?",
+                "Compares ordered funnel stages using positive stage values.",
+            ),
+            (
+                "Budget cap",
+                "stages.truncate(4)",
+                "Keeps the rendered funnel compact by limiting stage count.",
             ),
         ],
         _ => &[

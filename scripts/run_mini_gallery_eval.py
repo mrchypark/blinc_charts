@@ -20,6 +20,55 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DESKTOP_MANIFEST = ROOT / "examples/blinc_charts_desktop/Cargo.toml"
 DEFAULT_MODEL = "gpt-5.4-mini"
+INVALID_FUNNEL_STYLE_FIELDS = ("scroll_zoom_factor", "pinch_zoom_min")
+FUNNEL_STATIC_VARIANT_CODE = "FunnelChartModel::new(stages)?"
+FUNNEL_BUDGET_VARIANT_CODE = "stages.truncate(4)"
+FUNNEL_STATIC_EVIDENCE = """
+let stages = vec![("Visitors".into(), 12000.0), ("Paid".into(), 1480.0)];
+let model = FunnelChartModel::new(stages)?;
+funnel_chart(FunnelChartHandle::new(model))
+Funnel is static/model-driven: FunnelChartStyle has no scroll_zoom_factor or pinch_zoom_min.
+""".strip()
+MINIMAL_SETUP = """
+Minimal setup examples:
+let x: Vec<f32> = (0..160).map(|i| i as f32).collect();
+let y: Vec<f32> = x.iter().map(|v| (v * 0.12).sin()).collect();
+let series = TimeSeriesF32::new(x, y)?;
+let mut model = LineChartModel::new(series);
+model.style.scroll_zoom_factor = 0.02;
+let mut bindings = ChartInputBindings::default();
+bindings.scroll_zoom = true;
+let chart = line_chart_with_bindings(LineChartHandle::new(model), bindings);
+Ok(div().w(640.0).h(320.0).child(chart))
+
+let x2: Vec<f32> = (0..160).map(|i| i as f32).collect();
+let a = TimeSeriesF32::new(x2.clone(), x2.iter().map(|v| v.sin()).collect())?;
+let b = TimeSeriesF32::new(x2, (0..160).map(|i| (i as f32).cos()).collect())?;
+let mut stacked = StackedAreaChartModel::new(vec![a, b])?;
+stacked.style.mode = StackedAreaMode::Stacked;
+
+Notes:
+- LineChartModel, AreaChartModel, and ScatterChartModel take TimeSeriesF32, not Point vectors.
+- ScatterChartModel::new(series) returns a model directly; do not add ?.
+- BarChartModel, MultiLineChartModel, and StackedAreaChartModel take Vec<TimeSeriesF32>.
+- For StackedArea, call StackedAreaChartModel::new(vec![series_a, series_b]) even for simple examples.
+- Constructors ending in ? in the examples return Result; keep the ? before mutating model.style.
+- Builders return impl ElementBuilder; wrap them in div().child(builder) when returning Div.
+- Use ChartInputBindings::default(); there are no per-family binding types.
+- For line budget caps, use model.set_downsample_max_points(128), not model.style.max_points.
+- For scatter budget caps, use model.set_max_points(128), not set_downsample_max_points.
+- For histogram budget caps, use model.style.bins = 48; HistogramChartModel has no set_max_points.
+- StatisticsChartModel::new takes Vec<Vec<f32>> grouped samples, not TimeSeriesF32.
+- PolarChartModel::new_radar takes dimensions plus Vec<Vec<f32>> series rows, not a single Vec<f32>.
+- NetworkChartModel::new_graph/new_sankey/new_chord all return Result; keep the ? before mutating model.style.
+- DensityMap uses density_map_chart(DensityMapChartHandle::new(model)); there is no density_map_chart_with_bindings.
+- Funnel is static/model-driven: FunnelChartStyle has no scroll_zoom_factor or pinch_zoom_min.
+- For candlestick data, build Candle { x, open, high, low, close } values and call CandleSeries::new(candles)?.
+- For candlestick budget caps, use model.style.max_candles, not model.style.max_points.
+- For MultiLine detail caps, use model.style.max_points_per_series, not model.style.max_segments.
+- For linked charts, create links with chart_link(0.0, 159.0) and pass bindings to linked_*_chart_with_bindings(...).
+- Do not call input_bindings on a chart builder.
+""".strip()
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -33,22 +82,120 @@ def cargo_env() -> dict[str, str]:
 
 
 def load_cases() -> list[dict]:
-    proc = run(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "--manifest-path",
-            str(DESKTOP_MANIFEST),
-            "--bin",
-            "export_coverage_matrix",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    cache = ROOT / "target/blinc_charts_mini_eval/coverage_matrix.json"
+    if cache.exists():
+        try:
+            return normalize_cases(json.loads(cache.read_text())["cases"])
+        except json.JSONDecodeError:
+            cache.unlink()
+    prompts = load_cases_from_prompts()
+    if len(prompts) == 117:
+        return normalize_cases(prompts)
+    try:
+        proc = run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "--manifest-path",
+                str(DESKTOP_MANIFEST),
+                "--bin",
+                "export_coverage_matrix",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return normalize_cases(prompts)
     if proc.returncode != 0:
+        if prompts:
+            return normalize_cases(prompts)
         raise SystemExit(proc.stderr)
-    return json.loads(proc.stdout)["cases"]
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(proc.stdout)
+    return normalize_cases(json.loads(proc.stdout)["cases"])
+
+
+def load_cases_from_prompts() -> list[dict]:
+    prompts = sorted((ROOT / "target/blinc_charts_mini_eval/prompts").glob("case_*.md"))
+    cases = []
+    for path in prompts:
+        text = path.read_text()
+        index = int(path.stem.split("_")[1])
+        family = find_line(text, "- chart family: ")
+        variant = find_line(text, "- variant: ")
+        interaction = find_line(text, "- interaction: ")
+        variant_code = find_block(text, "Required variant code or equivalent:", "Required interaction code or equivalent:")
+        interaction_code = find_block(text, "Required interaction code or equivalent:", "Example-only evidence:")
+        evidence = text.split("Example-only evidence:", 1)[1].strip()
+        cases.append(
+            {
+                "index": index,
+                "family": family,
+                "variant": variant,
+                "variant_code": variant_code,
+                "variant_effect": "",
+                "interaction": interaction,
+                "interaction_code": interaction_code,
+                "interaction_effect": "",
+                "task": (
+                    "Using only the provided blinc_charts examples, write a Rust function "
+                    f"that builds chart={family} variant={variant} interaction={interaction} "
+                    "and returns a Blinc element."
+                ),
+                "evidence": evidence,
+            }
+        )
+    return cases
+
+
+def find_line(text: str, prefix: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            return stripped[len(prefix) :].strip()
+    return ""
+
+
+def find_block(text: str, start: str, end: str) -> str:
+    return text.split(start, 1)[1].split(end, 1)[0].strip()
+
+
+def normalize_cases(cases: list[dict]) -> list[dict]:
+    return [normalize_case(case) for case in cases]
+
+
+def normalize_case(case: dict) -> dict:
+    if case.get("family") != "Funnel":
+        return case
+
+    text = "\n".join(str(case.get(key, "")) for key in ("variant_code", "evidence"))
+    if "set_*_max_points" in text or "style.max_*" in text:
+        normalized = dict(case)
+        normalized.update(
+            {
+                "variant": "Budget cap",
+                "variant_code": FUNNEL_BUDGET_VARIANT_CODE,
+                "variant_effect": "Keeps the rendered funnel compact by limiting stage count.",
+                "evidence": "\n".join([FUNNEL_STATIC_EVIDENCE, FUNNEL_BUDGET_VARIANT_CODE]),
+            }
+        )
+        return normalized
+
+    if not any(field in text for field in INVALID_FUNNEL_STYLE_FIELDS):
+        return case
+
+    normalized = dict(case)
+    normalized.update(
+        {
+            "variant": "Stage values",
+            "variant_code": FUNNEL_STATIC_VARIANT_CODE,
+            "variant_effect": "Uses FunnelChartModel stage values; Funnel has no scroll or pinch style fields.",
+            "evidence": FUNNEL_STATIC_EVIDENCE,
+        }
+    )
+    return normalized
 
 
 def select_cases(cases: list[dict], args: argparse.Namespace) -> list[dict]:
@@ -75,6 +222,8 @@ def prompt_for(case: dict) -> str:
           use blinc_charts::prelude::*;
           use blinc_core::{{Color, Point}};
           use blinc_layout::prelude::*;
+
+        {MINIMAL_SETUP}
 
         Chart spec:
         - chart family: {case["family"]}
@@ -125,6 +274,42 @@ def call_openai(prompt: str, model: str, api_key: str) -> str:
             if "text" in content:
                 chunks.append(content["text"])
     return "\n".join(chunks).strip()
+
+
+def call_codex_exec(prompt: str, model: str, out: Path, index: int, timeout: int) -> str:
+    workspace = out / "codex_workspace"
+    messages = out / "codex_messages"
+    workspace.mkdir(parents=True, exist_ok=True)
+    messages.mkdir(parents=True, exist_ok=True)
+    output = messages / f"case_{index:03d}.txt"
+    cmd = [
+        "codex",
+        "exec",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "--cd",
+        str(workspace),
+        "--output-last-message",
+        str(output),
+    ]
+    if model:
+        cmd.extend(["--model", model])
+    cmd.append(prompt)
+    proc = subprocess.run(
+        cmd,
+        cwd=workspace,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=timeout,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stdout[-4000:])
+    return output.read_text()
 
 
 def extract_code(text: str) -> str:
@@ -243,6 +428,8 @@ def compile_crate(crate: Path) -> subprocess.CompletedProcess:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL", DEFAULT_MODEL))
+    parser.add_argument("--backend", choices=["openai", "codex-exec"], default="openai")
+    parser.add_argument("--codex-timeout", type=int, default=360)
     parser.add_argument("--out", type=Path, default=ROOT / "target/blinc_charts_mini_eval")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--case", action="append", help="Coverage case index to run")
@@ -269,12 +456,16 @@ def main() -> int:
 
         if args.reuse and code_path.exists():
             code = code_path.read_text()
-        elif args.dry_run or not api_key:
-            results.append({**case, "status": "prompted", "reason": "dry_run_or_no_api_key"})
+        elif args.dry_run or (args.backend == "openai" and not api_key):
+            reason = "dry_run" if args.dry_run else "no_api_key"
+            results.append({**case, "status": "prompted", "reason": reason})
             continue
         else:
             started = time.time()
-            code = extract_code(call_openai(prompt, args.model, api_key))
+            if args.backend == "codex-exec":
+                code = extract_code(call_codex_exec(prompt, args.model, args.out, idx, args.codex_timeout))
+            else:
+                code = extract_code(call_openai(prompt, args.model, api_key))
             code_path.write_text(code + "\n")
             results.append({**case, "status": "generated", "seconds": round(time.time() - started, 2)})
 
@@ -302,6 +493,7 @@ def main() -> int:
 
     summary = {
         "model": args.model,
+        "backend": args.backend,
         "case_count": len(cases),
         "generated_count": len(generated),
         "compile_status": compile_status,
@@ -318,7 +510,7 @@ def main() -> int:
     if compile_status == "failed":
         print(proc_output[-4000:], file=sys.stderr)
         return 1
-    if not generated and not args.dry_run:
+    if not generated and not args.dry_run and args.backend == "openai":
         print("OPENAI_API_KEY is not set; prompts were written but no model calls ran.", file=sys.stderr)
         return 2
     return 0
