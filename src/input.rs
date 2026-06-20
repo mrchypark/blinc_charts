@@ -60,6 +60,8 @@ pub struct ChartInputBindings {
     pub brush_drag: DragBinding,
     /// Which drag gesture is interpreted as pan (when not brushing).
     pub pan_drag: DragBinding,
+    /// Whether wheel/trackpad scroll zooms the chart domain.
+    pub scroll_zoom: bool,
 }
 
 impl Default for ChartInputBindings {
@@ -73,6 +75,7 @@ impl Default for ChartInputBindings {
                 required: ModifiersReq::none(),
                 action: DragAction::PanX,
             },
+            scroll_zoom: true,
         }
     }
 }

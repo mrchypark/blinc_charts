@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blinc Charts Gallery</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #0a0c10;
+        color: #edf1f7;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      }
+      #blinc-canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #unsupported {
+        display: none;
+        position: absolute;
+        inset: 0;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 12px;
+        padding: 24px;
+        text-align: center;
+        line-height: 1.5;
+      }
+      #unsupported a { color: #73c7ff; }
+      .no-webgpu #blinc-canvas { display: none; }
+      .no-webgpu #unsupported { display: flex; }
+    </style>
+  </head>
+  <body>
+    <canvas id="blinc-canvas"></canvas>
+
+    <div id="unsupported">
+      <strong>WebGPU not available</strong>
+      <span>
+        Blinc's web target requires WebGPU.
+        Try Chrome / Edge 113+, or enable WebGPU in
+        <a href="https://caniuse.com/webgpu">your browser</a>.
+        wgpu may fall back to WebGL2 for some paths, but WebGPU is the
+        intended target for this gallery.
+      </span>
+    </div>
+
+    <script type="module">
+      const hasWebGPU = "gpu" in navigator;
+      const probeCanvas = document.createElement("canvas");
+      const hasWebGL2 = !!probeCanvas.getContext("webgl2");
+
+      if (!hasWebGPU && !hasWebGL2) {
+        document.body.classList.add("no-webgpu");
+      } else {
+        const { default: init } = await import("./pkg/blinc_charts_frontend.js");
+        await init();
+      }
+    </script>
+  </body>
+</html>
